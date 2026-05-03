@@ -10,13 +10,19 @@ function formatPrice(price, isFree) {
   return `${Number(price).toLocaleString('vi-VN')}đ`
 }
 
+function hasPreviewLessons(course) {
+  if (!course?.sections) return false
+  return course.sections.some(section =>
+    section.lessons?.some(lesson => lesson.isPreview)
+  )
+}
+
 function renderActionLabel(course) {
   if (!course) return 'Mua ngay'
   if (course.viewer?.isEnrolled) return 'Vào học ngay'
-  if (!course.viewer?.isAuthenticated) return 'Mua ngay'
+  if (hasPreviewLessons(course)) return 'Học thử'
   return 'Mua ngay'
 }
-
 export default function CourseDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -59,7 +65,7 @@ export default function CourseDetailPage() {
       const storedUser = getStoredUser()
 
       if (!storedUser) {
-        router.push(`/auth?redirect=${encodeURIComponent(`/checkout/${course.slug}`)}`)
+        router.push(`/auth?redirect=${encodeURIComponent(`/learn/${course.slug}`)}`)
         return
       }
 
@@ -68,11 +74,17 @@ export default function CourseDetailPage() {
         return
       }
 
+
+      if (hasPreviewLessons(course)) {
+        router.push(`/learn/${course.slug}`)
+        return
+      }
+
       router.push(`/checkout/${course.slug}`)
-    } finally {
-      setActionLoading(false)
-    }
-  }
+        } finally {
+          setActionLoading(false)
+        }
+  } 
 
   if (loading) {
     return (
