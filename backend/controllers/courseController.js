@@ -146,11 +146,6 @@ const getCourseDetail = async (req, res, next) => {
       });
     }
 
-    // ✅ FIX BUG_004: detect preview lesson
-    const hasPreviewLesson = course.sections?.some(section =>
-      section.lessons?.some(lesson => lesson.isPreview)
-    );
-
     let isEnrolled = false;
     if (userId) {
       const enrollment = await Enrollment.findOne({
@@ -166,7 +161,6 @@ const getCourseDetail = async (req, res, next) => {
       success: true,
       data: {
         ...course.toJSON(),
-        hasPreviewLesson, // ✅ thêm field cho frontend
         viewer: {
           isAuthenticated: Boolean(userId),
           isEnrolled,
@@ -242,15 +236,15 @@ const createCourse = async (req, res, next) => {
 
 const createSection = async (req, res, next) => {
   try {
-    const { courseId } = req.params;
-    const { title, sortOrder } = req.body;
+    const { courseId } = req.params
+    const { title, sortOrder } = req.body
 
-    const course = await Course.findByPk(courseId);
+    const course = await Course.findByPk(courseId)
     if (!course) {
       return res.status(404).json({
         success: false,
         message: 'Không tìm thấy khóa học',
-      });
+      })
     }
 
     if (
@@ -260,28 +254,28 @@ const createSection = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: 'Bạn không có quyền thêm section cho khóa học này',
-      });
+      })
     }
 
     const section = await CourseSection.create({
       courseId: course.id,
       title,
       sortOrder: Number(sortOrder || 0),
-    });
+    })
 
     return res.status(201).json({
       success: true,
       message: 'Tạo section thành công',
       data: section,
-    });
+    })
   } catch (error) {
-    next(error);
+    next(error)
   }
-};
+}
 
 const createLesson = async (req, res, next) => {
   try {
-    const { courseId } = req.params;
+    const { courseId } = req.params
     const {
       sectionId,
       title,
@@ -293,14 +287,14 @@ const createLesson = async (req, res, next) => {
       isPublished,
       sortOrder,
       unlockOrder,
-    } = req.body;
+    } = req.body
 
-    const course = await Course.findByPk(courseId);
+    const course = await Course.findByPk(courseId)
     if (!course) {
       return res.status(404).json({
         success: false,
         message: 'Không tìm thấy khóa học',
-      });
+      })
     }
 
     if (
@@ -310,7 +304,7 @@ const createLesson = async (req, res, next) => {
       return res.status(403).json({
         success: false,
         message: 'Bạn không có quyền thêm bài học cho khóa học này',
-      });
+      })
     }
 
     const section = await CourseSection.findOne({
@@ -318,13 +312,13 @@ const createLesson = async (req, res, next) => {
         id: sectionId,
         courseId: course.id,
       },
-    });
+    })
 
     if (!section) {
       return res.status(404).json({
         success: false,
-        message: 'Section không tồn tại',
-      });
+        message: 'Section không tồn tại trong khóa học này',
+      })
     }
 
     const lesson = await Lesson.create({
@@ -339,84 +333,17 @@ const createLesson = async (req, res, next) => {
       isPublished: isPublished !== undefined ? Boolean(isPublished) : true,
       unlockOrder: Number(unlockOrder || 0),
       sortOrder: Number(sortOrder || 0),
-    });
+    })
 
     return res.status(201).json({
       success: true,
       message: 'Tạo bài học thành công',
       data: lesson,
-    });
+    })
   } catch (error) {
-    next(error);
+    next(error)
   }
-};
-
-const updateCourse = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-
-    const course = await Course.findByPk(id);
-
-    if (!course) {
-      return res.status(404).json({
-        success: false,
-        message: 'Không tìm thấy khóa học',
-      });
-    }
-
-    if (
-      req.user.role !== 'admin' &&
-      !(req.user.role === 'instructor' && Number(course.instructorId) === Number(req.user.id))
-    ) {
-      return res.status(403).json({
-        success: false,
-        message: 'Bạn không có quyền sửa khóa học này',
-      });
-    }
-
-    const {
-      categoryId,
-      title,
-      slug,
-      shortDescription,
-      description,
-      coverImageUrl,
-      trailerUrl,
-      price,
-      level,
-      status,
-      isFree,
-    } = req.body;
-
-    const finalIsFree = isFree !== undefined
-      ? Boolean(isFree)
-      : Number(price || 0) === 0;
-
-    const finalPrice = finalIsFree ? 0 : Number(price || 0);
-
-    await course.update({
-      categoryId: categoryId || null,
-      title,
-      slug,
-      shortDescription,
-      description,
-      coverImageUrl,
-      trailerUrl,
-      price: finalPrice,
-      level,
-      status,
-      isFree: finalIsFree,
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: 'Cập nhật khóa học thành công',
-      data: course,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+}
 
 module.exports = {
   getCategories,
@@ -425,5 +352,4 @@ module.exports = {
   createCourse,
   createSection,
   createLesson,
-  updateCourse,
-};
+}

@@ -14,7 +14,7 @@ const {
   QuizQuestion,
 } = require('../models');
 
-const loadCourseForLearning = async (slug, transaction = null) => {
+const loadCourseForLearning = async (slug) => {
   return Course.findOne({
     where: { slug, status: 'public' },
     include: [
@@ -37,7 +37,6 @@ const loadCourseForLearning = async (slug, transaction = null) => {
       [{ model: CourseSection, as: 'sections' }, 'sortOrder', 'ASC'],
       [{ model: CourseSection, as: 'sections' }, { model: Lesson, as: 'lessons' }, 'sortOrder', 'ASC'],
     ],
-    transaction,
   });
 };
 
@@ -51,14 +50,13 @@ const flattenLessons = (course) => {
   return list;
 };
 
-const getProgressMap = async (enrollmentId, transaction = null) => {
+const getProgressMap = async (enrollmentId) => {
   const progresses = await LessonProgress.findAll({
     where: {
       enrollmentId,
       isCompleted: true,
     },
     attributes: ['lessonId'],
-    transaction,
   });
 
   return new Map(progresses.map((item) => [Number(item.lessonId), true]));
@@ -70,16 +68,15 @@ const buildLessonStateMap = (course, progressMap) => {
 
   flatLessons.forEach((lesson, index) => {
     const prevLesson = flatLessons[index - 1];
-
     const isUnlocked =
       lesson.isPreview ||
       index === 0 ||
-      (prevLesson && progressMap.get(prevLesson.id));
+      Boolean(prevLesson && progressMap.get(prevLesson.id));
 
     const isCompleted = Boolean(progressMap.get(lesson.id));
 
     map.set(lesson.id, {
-      isUnlocked: Boolean(isUnlocked),
+      isUnlocked,
       isCompleted,
     });
   });
@@ -144,19 +141,25 @@ const getQuizByLesson = async (req, res, next) => {
     const progressMap = await getProgressMap(enrollment.id);
     const { flatLessons, map } = buildLessonStateMap(course, progressMap);
 
-    const lesson = flatLessons.find((l) => Number(l.id) === Number(lessonId));
-
-    if (!lesson || lesson.lessonType !== 'quiz') {
+    const lesson = flatLessons.find((item) => Number(item.id) === Number(lessonId));
+    if (!lesson) {
       return res.status(404).json({
         success: false,
-        message: 'Không tìm thấy quiz hợp lệ',
+        message: 'Không tìm thấy bài quiz',
+      });
+    }
+
+    if (lesson.lessonType !== 'quiz') {
+      return res.status(400).json({
+        success: false,
+        message: 'Bài học này không phải quiz',
       });
     }
 
     if (!map.get(lesson.id)?.isUnlocked) {
       return res.status(403).json({
         success: false,
-        message: 'Quiz chưa được mở khóa',
+        message: 'Quiz này chưa được mở khóa',
       });
     }
 
@@ -189,11 +192,32 @@ const getQuizByLesson = async (req, res, next) => {
       });
     }
 
+    const latestAttempt = await QuizAttempt.findOne({
+      where: {
+        enrollmentId: enrollment.id,
+        quizId: quiz.id,
+      },
+      order: [['submittedAt', 'DESC']],
+    });
+
     return res.status(200).json({
       success: true,
       data: {
+        course: {
+          id: course.id,
+          title: course.title,
+          slug: course.slug,
+        },
         lesson,
         quiz,
+        latestAttempt: latestAttempt
+          ? {
+              id: latestAttempt.id,
+              score: Number(latestAttempt.score),
+              isPassed: latestAttempt.isPassed,
+              submittedAt: latestAttempt.submittedAt,
+            }
+          : null,
       },
     });
   } catch (error) {
@@ -208,24 +232,51 @@ const submitQuiz = async (req, res, next) => {
     const { slug, lessonId } = req.params;
     const submittedAnswers = Array.isArray(req.body.answers) ? req.body.answers : [];
 
-    const course = await loadCourseForLearning(slug, transaction);
-    if (!course) throw new Error('Không tìm thấy khóa học');
+    const course = await loadCourseForLearning(slug);
+    if (!course) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy khóa học',
+      });
+    }
 
     const enrollment = await Enrollment.findOne({
-      where: { userId: req.user.id, courseId: course.id },
+      where: {
+        userId: req.user.id,
+        courseId: course.id,
+      },
       transaction,
       lock: transaction.LOCK.UPDATE,
     });
 
-    if (!enrollment) throw new Error('Chưa enroll');
+    if (!enrollment) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn chưa sở hữu khóa học này',
+      });
+    }
 
-    const progressMap = await getProgressMap(enrollment.id, transaction);
+    const progressMap = await getProgressMap(enrollment.id);
     const { flatLessons, map } = buildLessonStateMap(course, progressMap);
 
-    const lesson = flatLessons.find((l) => Number(l.id) === Number(lessonId));
-    if (!lesson || lesson.lessonType !== 'quiz') throw new Error('Lesson không hợp lệ');
+    const lesson = flatLessons.find((item) => Number(item.id) === Number(lessonId));
+    if (!lesson || lesson.lessonType !== 'quiz') {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy quiz hợp lệ',
+      });
+    }
 
-    if (!map.get(lesson.id)?.isUnlocked) throw new Error('Chưa unlock');
+    if (!map.get(lesson.id)?.isUnlocked) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Quiz này chưa được mở khóa',
+      });
+    }
 
     const quiz = await Quiz.findOne({
       where: { lessonId: lesson.id },
@@ -233,19 +284,35 @@ const submitQuiz = async (req, res, next) => {
         {
           model: QuizQuestion,
           as: 'questions',
-          include: [{ model: QuizAnswer, as: 'answers' }],
+          include: [
+            {
+              model: QuizAnswer,
+              as: 'answers',
+            },
+          ],
         },
+      ],
+      order: [
+        [{ model: QuizQuestion, as: 'questions' }, 'sortOrder', 'ASC'],
+        [{ model: QuizQuestion, as: 'questions' }, { model: QuizAnswer, as: 'answers' }, 'id', 'ASC'],
       ],
       transaction,
     });
 
-    if (!quiz) throw new Error('Quiz chưa có');
+    if (!quiz) {
+      await transaction.rollback();
+      return res.status(404).json({
+        success: false,
+        message: 'Quiz chưa được tạo',
+      });
+    }
 
     const answerMap = new Map(
-      submittedAnswers.map((a) => [Number(a.questionId), Number(a.answerId)])
+      submittedAnswers.map((item) => [Number(item.questionId), Number(item.answerId)])
     );
 
     let correctCount = 0;
+    const totalQuestions = quiz.questions.length;
 
     const attempt = await QuizAttempt.create(
       {
@@ -260,34 +327,39 @@ const submitQuiz = async (req, res, next) => {
     );
 
     for (const question of quiz.questions) {
-      const answerId = answerMap.get(question.id);
-      if (!answerId) continue;
+      const selectedAnswerId = answerMap.get(Number(question.id));
+      if (!selectedAnswerId) continue;
 
-      const answer = question.answers.find((a) => a.id === answerId);
-      if (!answer) continue;
+      const selectedAnswer = question.answers.find(
+        (answer) => Number(answer.id) === Number(selectedAnswerId)
+      );
 
-      const isCorrect = Boolean(answer.isCorrect);
-      if (isCorrect) correctCount++;
+      if (!selectedAnswer) continue;
+
+      const isCorrect = Boolean(selectedAnswer.isCorrect);
+      if (isCorrect) correctCount += 1;
 
       await QuizAttemptAnswer.create(
         {
           attemptId: attempt.id,
           questionId: question.id,
-          answerId: answer.id,
+          answerId: selectedAnswer.id,
           isCorrect,
         },
         { transaction }
       );
     }
 
-    const total = quiz.questions.length;
-    const score = total ? Number(((correctCount / total) * 100).toFixed(2)) : 0;
+    const score = totalQuestions
+      ? Number(((correctCount / totalQuestions) * 100).toFixed(2))
+      : 0;
+    const isPassed = score >= Number(quiz.passScore);
 
     attempt.score = score;
-    attempt.isPassed = score >= Number(quiz.passScore);
+    attempt.isPassed = isPassed;
     await attempt.save({ transaction });
 
-    if (attempt.isPassed) {
+    if (isPassed) {
       const [progress] = await LessonProgress.findOrCreate({
         where: {
           enrollmentId: enrollment.id,
@@ -297,6 +369,7 @@ const submitQuiz = async (req, res, next) => {
           enrollmentId: enrollment.id,
           lessonId: lesson.id,
           isCompleted: true,
+          watchedSeconds: 0,
           completedAt: new Date(),
         },
         transaction,
@@ -309,24 +382,143 @@ const submitQuiz = async (req, res, next) => {
       await recalculateEnrollmentProgress(enrollment, transaction);
     }
 
+    const currentIndex = flatLessons.findIndex((item) => Number(item.id) === Number(lesson.id));
+    const nextLesson = currentIndex >= 0 && currentIndex < flatLessons.length - 1 ? flatLessons[currentIndex + 1] : null;
+
     await transaction.commit();
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       data: {
+        attemptId: attempt.id,
         score,
-        isPassed: attempt.isPassed,
+        passScore: Number(quiz.passScore),
+        isPassed,
         correctCount,
-        totalQuestions: total,
+        totalQuestions,
+        nextLesson: nextLesson
+          ? {
+              id: nextLesson.id,
+              title: nextLesson.title,
+              lessonType: nextLesson.lessonType,
+            }
+          : null,
       },
+      message: isPassed
+        ? 'Chúc mừng, bạn đã vượt qua bài kiểm tra'
+        : 'Bạn chưa đạt. Vui lòng làm lại để tiếp tục',
     });
   } catch (error) {
     await transaction.rollback();
     next(error);
   }
 };
+const createQuiz = async (req, res, next) => {
+  try {
+    const { lessonId } = req.params
+    const { title, passScore, timeLimitMinutes } = req.body
 
+    const lesson = await Lesson.findByPk(lessonId)
+    if (!lesson) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy lesson',
+      })
+    }
+
+    if (lesson.lessonType !== 'quiz') {
+      return res.status(400).json({
+        success: false,
+        message: 'Lesson này không phải loại quiz',
+      })
+    }
+
+    const existingQuiz = await Quiz.findOne({ where: { lessonId: lesson.id } })
+    if (existingQuiz) {
+      return res.status(409).json({
+        success: false,
+        message: 'Lesson này đã có quiz',
+      })
+    }
+
+    const quiz = await Quiz.create({
+      lessonId: lesson.id,
+      title,
+      passScore: Number(passScore || 80),
+      timeLimitMinutes: timeLimitMinutes || null,
+    })
+
+    return res.status(201).json({
+      success: true,
+      message: 'Tạo quiz thành công',
+      data: quiz,
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+const createQuestion = async (req, res, next) => {
+  try {
+    const { quizId } = req.params
+    const { questionText, sortOrder } = req.body
+
+    const quiz = await Quiz.findByPk(quizId)
+    if (!quiz) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy quiz',
+      })
+    }
+
+    const question = await QuizQuestion.create({
+      quizId: quiz.id,
+      questionText,
+      sortOrder: Number(sortOrder || 0),
+    })
+
+    return res.status(201).json({
+      success: true,
+      message: 'Tạo câu hỏi thành công',
+      data: question,
+    })
+  } catch (error) {
+    next(error)
+  }
+}
+
+const createAnswer = async (req, res, next) => {
+  try {
+    const { questionId } = req.params
+    const { answerText, isCorrect } = req.body
+
+    const question = await QuizQuestion.findByPk(questionId)
+    if (!question) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy câu hỏi',
+      })
+    }
+
+    const answer = await QuizAnswer.create({
+      questionId: question.id,
+      answerText,
+      isCorrect: Boolean(isCorrect),
+    })
+
+    return res.status(201).json({
+      success: true,
+      message: 'Tạo đáp án thành công',
+      data: answer,
+    })
+  } catch (error) {
+    next(error)
+  }
+}
 module.exports = {
   getQuizByLesson,
   submitQuiz,
-};
+  createQuiz,
+  createQuestion,
+  createAnswer,
+}

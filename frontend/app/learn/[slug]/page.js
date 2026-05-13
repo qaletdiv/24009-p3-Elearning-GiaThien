@@ -67,15 +67,11 @@ export default function LearningPage() {
     }
   }, [slug, lessonId])
 
-  const currentLessonType = data?.currentLesson?.lessonType
-  const currentLessonId = data?.currentLesson?.id
-  const previewMode = data?.previewMode
-
   useEffect(() => {
-    if (!loading && currentLessonType === 'quiz' && !previewMode && currentLessonId) {
-      router.replace(`/learn/${slug}/quiz/${currentLessonId}`)
+    if (!loading && data?.currentLesson?.lessonType === 'quiz' && !data.previewMode) {
+      router.replace(`/learn/${slug}/quiz/${data.currentLesson.id}`)
     }
-  }, [loading, currentLessonType, previewMode, currentLessonId, slug, router])
+  }, [loading, data, router, slug])
 
   const handleSelectLesson = (selectedLessonId, selectedLessonType, isUnlocked) => {
     if (!isUnlocked) return
@@ -307,15 +303,17 @@ export default function LearningPage() {
             <div className="flex border-b border-slate-200">
               <button
                 onClick={() => setTab('discussion')}
-                className={`px-6 py-4 text-sm font-semibold ${tab === 'discussion' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500'
-                  }`}
+                className={`px-6 py-4 text-sm font-semibold ${
+                  tab === 'discussion' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500'
+                }`}
               >
                 Thảo luận
               </button>
               <button
                 onClick={() => setTab('document')}
-                className={`px-6 py-4 text-sm font-semibold ${tab === 'document' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500'
-                  }`}
+                className={`px-6 py-4 text-sm font-semibold ${
+                  tab === 'document' ? 'text-blue-600 border-b-2 border-blue-600' : 'text-slate-500'
+                }`}
               >
                 Tài liệu
               </button>
@@ -399,12 +397,13 @@ export default function LearningPage() {
                           key={lesson.id}
                           onClick={() => handleSelectLesson(lesson.id, lesson.lessonType, lesson.isUnlocked)}
                           disabled={!lesson.isUnlocked}
-                          className={`w-full rounded-2xl px-4 py-3 text-left transition ${isActive
+                          className={`w-full rounded-2xl px-4 py-3 text-left transition ${
+                            isActive
                               ? 'bg-blue-600 text-white'
                               : lesson.isUnlocked
-                                ? 'bg-white text-slate-700 hover:bg-slate-100'
-                                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                            }`}
+                              ? 'bg-white text-slate-700 hover:bg-slate-100'
+                              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                          }`}
                         >
                           <div className="flex items-start justify-between gap-3">
                             <div>

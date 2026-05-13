@@ -24,8 +24,7 @@ const {
   addEnrollmentValidator,
 } = require('../validators/manageCourseValidator');
 
-// ✅ FIX ROLE
-router.use(authenticateToken, authorizeRole('teacher'));
+router.use(authenticateToken, authorizeRole('admin', 'instructor'));
 
 router.get('/courses', manageCourseController.getManageCourses);
 

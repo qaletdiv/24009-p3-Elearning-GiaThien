@@ -10,6 +10,11 @@ const {
   getQuizValidator,
   submitQuizValidator,
 } = require('../validators/quizValidator');
+const {
+  createQuizValidator,
+  createQuestionValidator,
+  createAnswerValidator,
+} = require('../validators/quizManageValidator');
 
 router.get(
   '/courses/:slug/lessons/:lessonId',
@@ -29,6 +34,31 @@ router.post(
   quizController.submitQuiz
 );
 
+router.post(
+  '/lessons/:lessonId',
+  authenticateToken,
+  authorizeRole('admin', 'instructor'),
+  createQuizValidator,
+  validationErrorHandler,
+  quizController.createQuiz
+);
 
+router.post(
+  '/:quizId/questions',
+  authenticateToken,
+  authorizeRole('admin', 'instructor'),
+  createQuestionValidator,
+  validationErrorHandler,
+  quizController.createQuestion
+);
+
+router.post(
+  '/questions/:questionId/answers',
+  authenticateToken,
+  authorizeRole('admin', 'instructor'),
+  createAnswerValidator,
+  validationErrorHandler,
+  quizController.createAnswer
+);
 
 module.exports = router;

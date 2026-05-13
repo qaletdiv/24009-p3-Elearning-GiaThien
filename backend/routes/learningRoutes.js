@@ -2,11 +2,9 @@
 
 const express = require('express');
 const router = express.Router();
-
 const authenticateToken = require('../middlewares/authenticateToken');
 const validationErrorHandler = require('../middlewares/validationErrorHandler');
 const learningController = require('../controllers/learningController');
-
 const {
   getLearningDataValidator,
   completeLessonValidator,
@@ -15,7 +13,6 @@ const {
 
 router.use(authenticateToken);
 
-
 router.get(
   '/courses/:slug',
   getLearningDataValidator,
@@ -23,14 +20,12 @@ router.get(
   learningController.getLearningData
 );
 
-
 router.post(
   '/lessons/:lessonId/complete',
   completeLessonValidator,
   validationErrorHandler,
   learningController.completeLesson
 );
-
 
 router.post(
   '/lessons/:lessonId/discussions',

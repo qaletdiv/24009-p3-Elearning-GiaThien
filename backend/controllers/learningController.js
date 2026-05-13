@@ -101,16 +101,17 @@ const recalculateEnrollmentProgress = async (enrollment, transaction) => {
 
 const buildLearningState = (course, progressMap, previewMode) => {
   const flatLessons = flattenLessons(course);
+
   const lessonStateMap = new Map();
 
   flatLessons.forEach((lesson, index) => {
+    const prevLesson = flatLessons[index - 1];
     const isCompleted = Boolean(progressMap.get(lesson.id));
-
     const isUnlocked =
       previewMode ||
       lesson.isPreview ||
       index === 0 ||
-      Boolean(progressMap.get(flatLessons[index - 1]?.id));
+      Boolean(prevLesson && progressMap.get(prevLesson.id));
 
     lessonStateMap.set(lesson.id, {
       isCompleted,
@@ -166,7 +167,6 @@ const getLearningData = async (req, res, next) => {
     const previewMode = canPreviewCourse(req.user);
 
     let enrollment = null;
-
     if (!previewMode) {
       enrollment = await Enrollment.findOne({
         where: {
@@ -191,31 +191,32 @@ const getLearningData = async (req, res, next) => {
     }
 
     const progressMap = await getLessonProgressMap(enrollment?.id);
+    const { flatLessons, sections, lessonStateMap } = buildLearningState(course, progressMap, previewMode);
 
-    const { flatLessons, sections, lessonStateMap } = buildLearningState(
-      course,
-      progressMap,
-      previewMode
-    );
-
-    if (!flatLessons.length) {
-      return res.json({
+    if (flatLessons.length === 0) {
+      return res.status(200).json({
         success: true,
         data: {
-          course,
+          course: {
+            id: course.id,
+            title: course.title,
+            slug: course.slug,
+            coverImageUrl: course.coverImageUrl,
+            instructor: course.instructor,
+          },
           sections,
           currentLesson: null,
-          navigation: {},
+          navigation: {
+            previousLesson: null,
+            nextLesson: null,
+          },
           previewMode,
-          progressPercent: 0,
+          progressPercent: Number(enrollment?.progressPercent || 0),
         },
       });
     }
 
-    const fallbackLesson =
-      flatLessons.find((lesson) => lessonStateMap.get(lesson.id)?.isUnlocked) ||
-      flatLessons[0];
-
+    const fallbackLesson = flatLessons.find((lesson) => lessonStateMap.get(lesson.id)?.isUnlocked) || flatLessons[0];
     const currentLesson = requestedLessonId
       ? flatLessons.find((lesson) => lesson.id === requestedLessonId)
       : fallbackLesson;
@@ -228,19 +229,16 @@ const getLearningData = async (req, res, next) => {
     }
 
     const currentState = lessonStateMap.get(currentLesson.id);
-
     if (!currentState?.isUnlocked) {
       return res.status(403).json({
         success: false,
-        message: 'Bài học chưa mở khóa',
+        message: 'Bài học này chưa được mở khóa',
       });
     }
 
-    const currentIndex = flatLessons.findIndex((l) => l.id === currentLesson.id);
-
+    const currentIndex = flatLessons.findIndex((lesson) => lesson.id === currentLesson.id);
     const previousLesson = currentIndex > 0 ? flatLessons[currentIndex - 1] : null;
-    const nextLesson =
-      currentIndex < flatLessons.length - 1 ? flatLessons[currentIndex + 1] : null;
+    const nextLesson = currentIndex < flatLessons.length - 1 ? flatLessons[currentIndex + 1] : null;
 
     const discussions = await Discussion.findAll({
       where: { lessonId: currentLesson.id },
@@ -254,13 +252,14 @@ const getLearningData = async (req, res, next) => {
       order: [['createdAt', 'ASC']],
     });
 
-    return res.json({
+    return res.status(200).json({
       success: true,
       data: {
         course: {
           id: course.id,
           title: course.title,
           slug: course.slug,
+          coverImageUrl: course.coverImageUrl,
           instructor: course.instructor,
         },
         sections,
@@ -301,10 +300,10 @@ const completeLesson = async (req, res, next) => {
 
   try {
     const lessonId = Number(req.params.lessonId || 0);
+    const watchedSeconds = Number(req.body.watchedSeconds || 0);
 
     const lesson = await Lesson.findByPk(lessonId, { transaction });
-
-    if (!lesson) {
+    if (!lesson || !lesson.isPublished) {
       await transaction.rollback();
       return res.status(404).json({
         success: false,
@@ -312,9 +311,8 @@ const completeLesson = async (req, res, next) => {
       });
     }
 
-    const course = await Course.findByPk(lesson.courseId, { transaction });
-
-    if (!course) {
+    const course = await loadCourseForLearning(req.body.courseSlug);
+    if (!course || course.id !== lesson.courseId) {
       await transaction.rollback();
       return res.status(404).json({
         success: false,
@@ -323,12 +321,11 @@ const completeLesson = async (req, res, next) => {
     }
 
     const previewMode = canPreviewCourse(req.user);
-
     if (previewMode) {
       await transaction.rollback();
-      return res.json({
+      return res.status(200).json({
         success: true,
-        message: 'Preview mode',
+        message: 'Đang ở chế độ xem trước, không lưu tiến độ',
       });
     }
 
@@ -338,17 +335,29 @@ const completeLesson = async (req, res, next) => {
         courseId: course.id,
       },
       transaction,
+      lock: transaction.LOCK.UPDATE,
     });
 
     if (!enrollment) {
       await transaction.rollback();
       return res.status(403).json({
         success: false,
-        message: 'Bạn chưa mua khóa học',
+        message: 'Bạn chưa sở hữu khóa học này',
       });
     }
 
-    await LessonProgress.findOrCreate({
+    const progressMap = await getLessonProgressMap(enrollment.id);
+    const { lessonStateMap } = buildLearningState(course, progressMap, false);
+
+    if (!lessonStateMap.get(lesson.id)?.isUnlocked) {
+      await transaction.rollback();
+      return res.status(403).json({
+        success: false,
+        message: 'Bài học này chưa được mở khóa',
+      });
+    }
+
+    const [progress] = await LessonProgress.findOrCreate({
       where: {
         enrollmentId: enrollment.id,
         lessonId: lesson.id,
@@ -357,46 +366,116 @@ const completeLesson = async (req, res, next) => {
         enrollmentId: enrollment.id,
         lessonId: lesson.id,
         isCompleted: true,
+        watchedSeconds,
         completedAt: new Date(),
       },
       transaction,
     });
 
+    if (!progress.isCompleted) {
+      progress.isCompleted = true;
+      progress.completedAt = new Date();
+    }
+
+    if (watchedSeconds > progress.watchedSeconds) {
+      progress.watchedSeconds = watchedSeconds;
+    }
+
+    await progress.save({ transaction });
     await recalculateEnrollmentProgress(enrollment, transaction);
 
     await transaction.commit();
 
-    return res.json({ success: true });
-  } catch (err) {
+    return res.status(200).json({
+      success: true,
+      message: 'Đã đánh dấu hoàn thành bài học',
+    });
+  } catch (error) {
     await transaction.rollback();
-    next(err);
+    next(error);
   }
 };
 
 const createDiscussion = async (req, res, next) => {
   try {
     const lessonId = Number(req.params.lessonId || 0);
-    const { content } = req.body;
+    const { content, parentId } = req.body;
 
-    if (!content?.trim()) {
+    if (!content || !content.trim()) {
       return res.status(422).json({
         success: false,
-        message: 'Nội dung không được để trống',
+        message: 'Nội dung thảo luận không được để trống',
       });
     }
 
+    const lesson = await Lesson.findByPk(lessonId);
+    if (!lesson || !lesson.isPublished) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy bài học',
+      });
+    }
+
+    const course = await loadCourseForLearning(req.body.courseSlug);
+    if (!course || course.id !== lesson.courseId) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy khóa học',
+      });
+    }
+
+    const previewMode = canPreviewCourse(req.user);
+
+    if (!previewMode) {
+      const enrollment = await Enrollment.findOne({
+        where: {
+          userId: req.user.id,
+          courseId: course.id,
+        },
+      });
+
+      if (!enrollment) {
+        return res.status(403).json({
+          success: false,
+          message: 'Bạn chưa sở hữu khóa học này',
+        });
+      }
+
+      const progressMap = await getLessonProgressMap(enrollment.id);
+      const { lessonStateMap } = buildLearningState(course, progressMap, false);
+
+      if (!lessonStateMap.get(lesson.id)?.isUnlocked) {
+        return res.status(403).json({
+          success: false,
+          message: 'Bài học này chưa được mở khóa',
+        });
+      }
+    }
+
     const discussion = await Discussion.create({
-      lessonId,
+      lessonId: lesson.id,
       userId: req.user.id,
+      parentId: parentId || null,
       content: content.trim(),
     });
 
-    return res.json({
-      success: true,
-      data: discussion,
+    const freshDiscussion = await Discussion.findByPk(discussion.id, {
+      include: [
+        {
+          model: User,
+          as: 'user',
+          attributes: ['id', 'fullName', 'avatarUrl'],
+        },
+      ],
     });
-  } catch (err) {
-    next(err);
+
+    return res.status(201).json({
+      success: true,
+      message: 'Đăng thảo luận thành công',
+      data: freshDiscussion,
+    });
+  } catch (error) {
+    next(error);
   }
 };
 

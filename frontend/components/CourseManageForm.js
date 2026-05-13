@@ -77,47 +77,42 @@ export default function CourseManageForm({ courseId = null }) {
     }))
   }
 
- const handleSubmit = async (e) => {
-  e.preventDefault()
+  const handleSubmit = async (e) => {
+    e.preventDefault()
 
-  try {
-    setSaving(true)
-    setError('')
-    setMessage('')
+    try {
+      setSaving(true)
+      setError('')
+      setMessage('')
 
-    // ✅ FIX BUG_012: lấy price làm nguồn sự thật
-    const price = Number(form.price || 0)
-    const isFree = price === 0
+      const payload = {
+        ...form,
+        categoryId: form.categoryId ? Number(form.categoryId) : null,
+        price: form.isFree ? 0 : Number(form.price || 0),
+        isFree: Boolean(form.isFree),
+      }
 
-    const payload = {
-      ...form,
-      categoryId: form.categoryId ? Number(form.categoryId) : null,
-      price,
-      isFree,
+      if (isCreate) {
+        await apiRequest('/manage/courses', {
+          method: 'POST',
+          body: JSON.stringify(payload),
+        })
+        setMessage('Tạo khóa học thành công')
+      } else {
+        await apiRequest(`/manage/courses/${courseId}`, {
+          method: 'PUT',
+          body: JSON.stringify(payload),
+        })
+        setMessage('Cập nhật khóa học thành công')
+      }
+
+      router.push('/dashboard/courses')
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSaving(false)
     }
-
-    if (isCreate) {
-      await apiRequest('/manage/courses', {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
-    } else {
-      await apiRequest(`/manage/courses/${courseId}`, {
-        method: 'PUT',
-        body: JSON.stringify(payload),
-      })
-    }
-
-    // ✅ UX tốt hơn
-    alert(isCreate ? 'Tạo khóa học thành công' : 'Cập nhật thành công')
-
-    router.push('/dashboard/courses')
-  } catch (err) {
-    setError(err.message)
-  } finally {
-    setSaving(false)
   }
-}
 
   if (loading) {
     return (

@@ -1,62 +1,51 @@
 'use strict';
 
-const { body, param, query } = require('express-validator');
-
+const { body, param } = require('express-validator');
 
 const getLearningDataValidator = [
   param('slug')
     .trim()
     .notEmpty()
     .withMessage('Slug khóa học không được để trống'),
-
-  query('lessonId')
-    .optional()
-    .isInt({ min: 1 })
-    .withMessage('lessonId không hợp lệ')
-    .toInt(),
 ];
-
 
 const completeLessonValidator = [
   param('lessonId')
     .isInt({ min: 1 })
-    .withMessage('lessonId không hợp lệ')
-    .toInt(),
+    .withMessage('lessonId không hợp lệ'),
 
   body('courseSlug')
-    .optional() 
-    .trim(),
+    .trim()
+    .notEmpty()
+    .withMessage('courseSlug không được để trống'),
 
   body('watchedSeconds')
     .optional()
     .isInt({ min: 0 })
-    .withMessage('watchedSeconds phải là số nguyên ≥ 0')
-    .toInt(),
+    .withMessage('watchedSeconds phải là số nguyên lớn hơn hoặc bằng 0'),
 ];
-
 
 const createDiscussionValidator = [
   param('lessonId')
     .isInt({ min: 1 })
-    .withMessage('lessonId không hợp lệ')
-    .toInt(),
+    .withMessage('lessonId không hợp lệ'),
 
   body('courseSlug')
-    .optional() 
-    .trim(),
+    .trim()
+    .notEmpty()
+    .withMessage('courseSlug không được để trống'),
 
   body('content')
     .trim()
     .notEmpty()
-    .withMessage('Nội dung không được để trống')
+    .withMessage('Nội dung thảo luận không được để trống')
     .isLength({ min: 2, max: 5000 })
-    .withMessage('Nội dung phải từ 2–5000 ký tự'),
+    .withMessage('Nội dung thảo luận phải từ 2 đến 5000 ký tự'),
 
   body('parentId')
     .optional({ nullable: true })
     .isInt({ min: 1 })
-    .withMessage('parentId không hợp lệ')
-    .toInt(),
+    .withMessage('parentId không hợp lệ'),
 ];
 
 module.exports = {
