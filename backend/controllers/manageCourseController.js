@@ -200,6 +200,7 @@ const createManageCourse = async (req, res, next) => {
   try {
     const {
       categoryId,
+      instructorId, 
       title,
       slug,
       shortDescription,
@@ -230,11 +231,14 @@ const createManageCourse = async (req, res, next) => {
       }
     }
 
-    const finalIsFree = Boolean(isFree) || Number(price || 0) === 0;
+    const finalIsFree = isFree !== undefined ? Boolean(isFree) : Number(price || 0) === 0;
     const finalPrice = finalIsFree ? 0 : Number(price || 0);
+    
+  
+    const finalInstructorId = (req.user.role === 'admin' && instructorId) ? instructorId : req.user.id;
 
     const course = await Course.create({
-      instructorId: req.user.id,
+      instructorId: finalInstructorId,
       categoryId: categoryId || null,
       title,
       slug,
@@ -271,6 +275,7 @@ const updateManageCourse = async (req, res, next) => {
 
     const {
       categoryId,
+      instructorId, 
       title,
       slug,
       shortDescription,
@@ -307,9 +312,12 @@ const updateManageCourse = async (req, res, next) => {
       }
     }
 
-    const finalIsFree = Boolean(isFree) || Number(price || 0) === 0;
+    const finalIsFree = isFree !== undefined ? Boolean(isFree) : (Number(price || 0) === 0);
     const finalPrice = finalIsFree ? 0 : Number(price || 0);
 
+    if (req.user.role === 'admin' && instructorId) {
+      course.instructorId = instructorId; // Fix BUG_009
+    }
     course.categoryId = categoryId || null;
     course.title = title;
     course.slug = slug;
@@ -381,6 +389,7 @@ const getCourseEditorData = async (req, res, next) => {
                 'lessonType',
                 'content',
                 'videoUrl',
+                'documentUrl', 
                 'durationSeconds',
                 'isPreview',
                 'isPublished',
@@ -533,6 +542,7 @@ const createLesson = async (req, res, next) => {
       lessonType: req.body.lessonType,
       content: req.body.content || null,
       videoUrl: req.body.videoUrl || null,
+      documentUrl: req.body.documentUrl || null, // Fix BUG_011
       durationSeconds: req.body.durationSeconds || null,
       isPreview: Boolean(req.body.isPreview),
       isPublished: req.body.isPublished !== undefined ? Boolean(req.body.isPublished) : true,
@@ -573,6 +583,7 @@ const updateLesson = async (req, res, next) => {
     lesson.lessonType = req.body.lessonType;
     lesson.content = req.body.content || null;
     lesson.videoUrl = req.body.videoUrl || null;
+    lesson.documentUrl = req.body.documentUrl || null; // Fix BUG_011
     lesson.durationSeconds = req.body.durationSeconds || null;
     lesson.isPreview = Boolean(req.body.isPreview);
     lesson.isPublished = req.body.isPublished !== undefined ? Boolean(req.body.isPublished) : true;

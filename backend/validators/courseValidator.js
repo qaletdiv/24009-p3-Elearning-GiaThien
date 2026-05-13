@@ -22,6 +22,12 @@ const createCourseValidator = [
     .isInt({ min: 1 })
     .withMessage('categoryId không hợp lệ'),
 
+  
+  body('instructorId')
+    .optional({ nullable: true })
+    .isInt({ min: 1 })
+    .withMessage('instructorId không hợp lệ'),
+
   body('price')
     .optional()
     .isFloat({ min: 0 })
@@ -105,6 +111,11 @@ const createLessonValidator = [
     .optional()
     .isInt({ min: 0 })
     .withMessage('unlockOrder không hợp lệ'),
+  
+  body('documentUrl')
+    .optional({ nullable: true })
+    .isString()
+    .withMessage('documentUrl phải là chuỗi ký tự'),
 ];
 
 module.exports = {

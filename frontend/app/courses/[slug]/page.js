@@ -10,13 +10,6 @@ function formatPrice(price, isFree) {
   return `${Number(price).toLocaleString('vi-VN')}đ`
 }
 
-function renderActionLabel(course) {
-  if (!course) return 'Mua ngay'
-  if (course.viewer?.isEnrolled) return 'Vào học ngay'
-  if (!course.viewer?.isAuthenticated) return 'Mua ngay'
-  return 'Mua ngay'
-}
-
 export default function CourseDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -51,6 +44,16 @@ export default function CourseDetailPage() {
     return course.sections.reduce((sum, section) => sum + (section.lessons?.length || 0), 0)
   }, [course])
 
+
+  const firstPreviewLesson = useMemo(() => {
+    if (!course?.sections) return null
+    for (const section of course.sections) {
+      const preview = section.lessons?.find((l) => l.isPreview)
+      if (preview) return preview
+    }
+    return null
+  }, [course])
+
   const handlePrimaryAction = async () => {
     if (!course) return
 
@@ -72,6 +75,18 @@ export default function CourseDetailPage() {
     } finally {
       setActionLoading(false)
     }
+  }
+
+  const handleLearnPreview = () => {
+    if (firstPreviewLesson) {
+      router.push(`/learn/${course.slug}?lessonId=${firstPreviewLesson.id}`)
+    }
+  }
+
+  const renderActionLabel = () => {
+    if (!course) return 'Mua ngay'
+    if (course.viewer?.isEnrolled) return 'Vào học ngay'
+    return 'Mua ngay'
   }
 
   if (loading) {
@@ -178,10 +193,19 @@ export default function CourseDetailPage() {
                         >
                           <div>
                             <p className="font-medium text-slate-800">{lesson.title}</p>
-                            <p className="mt-1 text-slate-500">{lesson.lessonType}</p>
+                            <p className="mt-1 text-xs text-slate-500 uppercase tracking-wider">{lesson.lessonType}</p>
                           </div>
-                          <div className="text-right text-slate-500">
-                            {lesson.isPreview ? 'Preview' : 'Nội dung khóa học'}
+                          <div className="text-right">
+                            {lesson.isPreview ? (
+                              <button 
+                                onClick={handleLearnPreview}
+                                className="text-blue-600 font-semibold hover:underline"
+                              >
+                                Học thử
+                              </button>
+                            ) : (
+                              <span className="text-slate-400">Nội dung khóa học</span>
+                            )}
                           </div>
                         </div>
                       ))}
@@ -191,29 +215,6 @@ export default function CourseDetailPage() {
               ) : (
                 <p className="text-slate-500">Chưa có giáo án chi tiết.</p>
               )}
-            </div>
-          </div>
-
-          <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
-            <h2 className="text-2xl font-bold text-slate-900">Giảng viên</h2>
-            <div className="mt-5 flex items-start gap-4">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-slate-200 text-xl font-semibold text-slate-700">
-                {course.instructor?.avatarUrl ? (
-                  <img
-                    src={`http://localhost:5000${course.instructor.avatarUrl}`}
-                    alt={course.instructor.fullName}
-                    className="h-full w-full rounded-full object-cover"
-                  />
-                ) : (
-                  course.instructor?.fullName?.charAt(0)?.toUpperCase() || 'I'
-                )}
-              </div>
-              <div>
-                <h3 className="text-lg font-semibold text-slate-900">{course.instructor?.fullName || 'Đang cập nhật'}</h3>
-                <p className="mt-2 text-sm leading-7 text-slate-600">
-                  Giảng viên đang phụ trách và đồng hành cùng học viên trong suốt lộ trình học tập của khóa học này.
-                </p>
-              </div>
             </div>
           </div>
         </div>
@@ -232,9 +233,22 @@ export default function CourseDetailPage() {
               <li>• Làm quiz nếu khóa học có bài kiểm tra</li>
             </ul>
 
-            <Button className="mt-8 w-full" onClick={handlePrimaryAction} disabled={actionLoading}>
-              {actionLoading ? 'Đang xử lý...' : renderActionLabel(course)}
-            </Button>
+            <div className="mt-8 space-y-3">
+              <Button className="w-full" onClick={handlePrimaryAction} disabled={actionLoading}>
+                {actionLoading ? 'Đang xử lý...' : renderActionLabel()}
+              </Button>
+
+            
+              {firstPreviewLesson && !course.viewer?.isEnrolled && (
+                <Button 
+                  variant="outline" 
+                  className="w-full border-blue-600 text-blue-600 hover:bg-blue-50" 
+                  onClick={handleLearnPreview}
+                >
+                  Học thử ngay
+                </Button>
+              )}
+            </div>
 
             {!course.viewer?.isAuthenticated && (
               <p className="mt-3 text-center text-sm text-slate-500">

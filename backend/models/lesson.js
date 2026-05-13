@@ -40,6 +40,11 @@ const Lesson = sequelize.define(
       allowNull: true,
       field: 'video_url',
     },
+    documentUrl: { // Fix BUG_011: Bổ sung trường lưu trữ đường dẫn tài liệu
+      type: DataTypes.STRING(255),
+      allowNull: true,
+      field: 'document_url',
+    },
     durationSeconds: {
       type: DataTypes.INTEGER.UNSIGNED,
       allowNull: true,
