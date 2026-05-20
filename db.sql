@@ -271,3 +271,6 @@ CREATE TABLE notifications (
   created_at TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP,
   CONSTRAINT fk_notifications_user FOREIGN KEY (user_id) REFERENCES users(id)
 );
+
+ALTER TABLE lessons 
+ADD COLUMN document_url VARCHAR(255) NULL AFTER video_url;
