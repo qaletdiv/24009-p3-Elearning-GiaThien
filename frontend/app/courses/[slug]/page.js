@@ -19,8 +19,13 @@ export default function CourseDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [currentUser, setCurrentUser] = useState(null)
 
   useEffect(() => {
+    
+    const user = getStoredUser()
+    setCurrentUser(user)
+
     const fetchCourse = async () => {
       try {
         setLoading(true)
@@ -44,12 +49,16 @@ export default function CourseDetailPage() {
     return course.sections.reduce((sum, section) => sum + (section.lessons?.length || 0), 0)
   }, [course])
 
+  const isManagementRole = useMemo(() => {
+    return currentUser && (currentUser.role === 'admin' || currentUser.role === 'instructor')
+  }, [currentUser])
 
-  const firstPreviewLesson = useMemo(() => {
+  const firstLesson = useMemo(() => {
     if (!course?.sections) return null
     for (const section of course.sections) {
-      const preview = section.lessons?.find((l) => l.isPreview)
-      if (preview) return preview
+      if (section.lessons && section.lessons.length > 0) {
+        return section.lessons[0]
+      }
     }
     return null
   }, [course])
@@ -59,9 +68,12 @@ export default function CourseDetailPage() {
 
     try {
       setActionLoading(true)
-      const storedUser = getStoredUser()
+      if (isManagementRole) {
+        router.push(`/learn/${course.slug}`)
+        return
+      }
 
-      if (!storedUser) {
+      if (!currentUser) {
         router.push(`/auth?redirect=${encodeURIComponent(`/checkout/${course.slug}`)}`)
         return
       }
@@ -77,14 +89,9 @@ export default function CourseDetailPage() {
     }
   }
 
-  const handleLearnPreview = () => {
-    if (firstPreviewLesson) {
-      router.push(`/learn/${course.slug}?lessonId=${firstPreviewLesson.id}`)
-    }
-  }
-
   const renderActionLabel = () => {
     if (!course) return 'Mua ngay'
+    if (isManagementRole) return 'Xem với tư cách Quản trị'
     if (course.viewer?.isEnrolled) return 'Vào học ngay'
     return 'Mua ngay'
   }
@@ -196,12 +203,13 @@ export default function CourseDetailPage() {
                             <p className="mt-1 text-xs text-slate-500 uppercase tracking-wider">{lesson.lessonType}</p>
                           </div>
                           <div className="text-right">
-                            {lesson.isPreview ? (
+                            {/* Admin/Instructor có thể nhấn vào bất kỳ bài nào để vào học luôn */}
+                            {(isManagementRole || lesson.isPreview) ? (
                               <button 
-                                onClick={handleLearnPreview}
+                                onClick={() => router.push(`/learn/${course.slug}?lessonId=${lesson.id}`)}
                                 className="text-blue-600 font-semibold hover:underline"
                               >
-                                Học thử
+                                {isManagementRole ? 'Xem nội dung' : 'Học thử'}
                               </button>
                             ) : (
                               <span className="text-slate-400">Nội dung khóa học</span>
@@ -237,22 +245,17 @@ export default function CourseDetailPage() {
               <Button className="w-full" onClick={handlePrimaryAction} disabled={actionLoading}>
                 {actionLoading ? 'Đang xử lý...' : renderActionLabel()}
               </Button>
-
-            
-              {firstPreviewLesson && !course.viewer?.isEnrolled && (
-                <Button 
-                  variant="outline" 
-                  className="w-full border-blue-600 text-blue-600 hover:bg-blue-50" 
-                  onClick={handleLearnPreview}
-                >
-                  Học thử ngay
-                </Button>
-              )}
             </div>
 
-            {!course.viewer?.isAuthenticated && (
+            {!currentUser && (
               <p className="mt-3 text-center text-sm text-slate-500">
                 Bạn cần đăng nhập để tiếp tục thanh toán.
+              </p>
+            )}
+            
+            {isManagementRole && (
+              <p className="mt-3 text-center text-xs text-blue-500 font-medium italic">
+                Bạn đang truy cập với quyền quản trị nội dung.
               </p>
             )}
           </div>

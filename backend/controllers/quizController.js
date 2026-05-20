@@ -200,6 +200,17 @@ const getQuizByLesson = async (req, res, next) => {
       order: [['submittedAt', 'DESC']],
     });
 
+    // Tính toán số câu đúng từ lịch sử để trả về dữ liệu đầy đủ cho Frontend hiển thị
+    let correctCount = 0;
+    if (latestAttempt) {
+      correctCount = await QuizAttemptAnswer.count({
+        where: {
+          attemptId: latestAttempt.id,
+          isCorrect: true
+        }
+      });
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -210,12 +221,15 @@ const getQuizByLesson = async (req, res, next) => {
         },
         lesson,
         quiz,
-        latestAttempt: latestAttempt
+        // Đổi key thành lastAttempt để đồng bộ hoàn toàn với cấu trúc Frontend nhận diện
+        lastAttempt: latestAttempt
           ? {
               id: latestAttempt.id,
               score: Number(latestAttempt.score),
               isPassed: latestAttempt.isPassed,
               submittedAt: latestAttempt.submittedAt,
+              correctCount: correctCount,
+              totalQuestions: quiz.questions?.length || 0,
             }
           : null,
       },
@@ -413,32 +427,33 @@ const submitQuiz = async (req, res, next) => {
     next(error);
   }
 };
+
 const createQuiz = async (req, res, next) => {
   try {
-    const { lessonId } = req.params
-    const { title, passScore, timeLimitMinutes } = req.body
+    const { lessonId } = req.params;
+    const { title, passScore, timeLimitMinutes } = req.body;
 
-    const lesson = await Lesson.findByPk(lessonId)
+    const lesson = await Lesson.findByPk(lessonId);
     if (!lesson) {
       return res.status(404).json({
         success: false,
         message: 'Không tìm thấy lesson',
-      })
+      });
     }
 
     if (lesson.lessonType !== 'quiz') {
       return res.status(400).json({
         success: false,
         message: 'Lesson này không phải loại quiz',
-      })
+      });
     }
 
-    const existingQuiz = await Quiz.findOne({ where: { lessonId: lesson.id } })
+    const existingQuiz = await Quiz.findOne({ where: { lessonId: lesson.id } });
     if (existingQuiz) {
       return res.status(409).json({
         success: false,
         message: 'Lesson này đã có quiz',
-      })
+      });
     }
 
     const quiz = await Quiz.create({
@@ -446,79 +461,80 @@ const createQuiz = async (req, res, next) => {
       title,
       passScore: Number(passScore || 80),
       timeLimitMinutes: timeLimitMinutes || null,
-    })
+    });
 
     return res.status(201).json({
       success: true,
       message: 'Tạo quiz thành công',
       data: quiz,
-    })
+    });
   } catch (error) {
-    next(error)
+    next(error);
   }
-}
+};
 
 const createQuestion = async (req, res, next) => {
   try {
-    const { quizId } = req.params
-    const { questionText, sortOrder } = req.body
+    const { quizId } = req.params;
+    const { questionText, sortOrder } = req.body;
 
-    const quiz = await Quiz.findByPk(quizId)
+    const quiz = await Quiz.findByPk(quizId);
     if (!quiz) {
       return res.status(404).json({
         success: false,
         message: 'Không tìm thấy quiz',
-      })
+      });
     }
 
     const question = await QuizQuestion.create({
       quizId: quiz.id,
       questionText,
       sortOrder: Number(sortOrder || 0),
-    })
+    });
 
     return res.status(201).json({
       success: true,
       message: 'Tạo câu hỏi thành công',
       data: question,
-    })
+    });
   } catch (error) {
-    next(error)
+    next(error);
   }
-}
+};
 
 const createAnswer = async (req, res, next) => {
   try {
-    const { questionId } = req.params
-    const { answerText, isCorrect } = req.body
+    const { questionId } = req.params;
+    const { answerText, isCorrect } = req.body;
 
-    const question = await QuizQuestion.findByPk(questionId)
+    const question = await QuizQuestion.findByPk(questionId);
     if (!question) {
       return res.status(404).json({
         success: false,
         message: 'Không tìm thấy câu hỏi',
-      })
+      });
     }
 
     const answer = await QuizAnswer.create({
       questionId: question.id,
       answerText,
       isCorrect: Boolean(isCorrect),
-    })
+    });
 
     return res.status(201).json({
       success: true,
       message: 'Tạo đáp án thành công',
       data: answer,
-    })
+    });
   } catch (error) {
-    next(error)
+    next(error);
   }
-}
+};
+
 module.exports = {
   getQuizByLesson,
   submitQuiz,
   createQuiz,
   createQuestion,
   createAnswer,
-}
+};

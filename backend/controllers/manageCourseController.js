@@ -234,7 +234,6 @@ const createManageCourse = async (req, res, next) => {
     const finalIsFree = isFree !== undefined ? Boolean(isFree) : Number(price || 0) === 0;
     const finalPrice = finalIsFree ? 0 : Number(price || 0);
     
-  
     const finalInstructorId = (req.user.role === 'admin' && instructorId) ? instructorId : req.user.id;
 
     const course = await Course.create({
@@ -316,7 +315,7 @@ const updateManageCourse = async (req, res, next) => {
     const finalPrice = finalIsFree ? 0 : Number(price || 0);
 
     if (req.user.role === 'admin' && instructorId) {
-      course.instructorId = instructorId; // Fix BUG_009
+      course.instructorId = instructorId;
     }
     course.categoryId = categoryId || null;
     course.title = title;
@@ -521,9 +520,12 @@ const createLesson = async (req, res, next) => {
   try {
     const course = await ensureCourseAccess(req.params.courseId, req.user);
 
+    // FIX LỖI 422: Ép kiểu Number rõ ràng cho sectionId nhận từ FormData
+    const targetSectionId = req.body.sectionId ? Number(req.body.sectionId) : null;
+
     const section = await CourseSection.findOne({
       where: {
-        id: req.body.sectionId,
+        id: targetSectionId,
         courseId: course.id,
       },
     });
@@ -535,6 +537,12 @@ const createLesson = async (req, res, next) => {
       });
     }
 
+    let documentUrl = req.body.documentUrl || null;
+    if (req.file) {
+      documentUrl = `/uploads/documents/${req.file.filename}`;
+    }
+
+    // FIX LỖI 422: Chuẩn hóa toàn bộ kiểu dữ liệu String sang Boolean và Number cho Sequelize
     const lesson = await Lesson.create({
       courseId: course.id,
       sectionId: section.id,
@@ -542,10 +550,10 @@ const createLesson = async (req, res, next) => {
       lessonType: req.body.lessonType,
       content: req.body.content || null,
       videoUrl: req.body.videoUrl || null,
-      documentUrl: req.body.documentUrl || null, // Fix BUG_011
-      durationSeconds: req.body.durationSeconds || null,
-      isPreview: Boolean(req.body.isPreview),
-      isPublished: req.body.isPublished !== undefined ? Boolean(req.body.isPublished) : true,
+      documentUrl: documentUrl, 
+      durationSeconds: req.body.durationSeconds ? Number(req.body.durationSeconds) : null,
+      isPreview: String(req.body.isPreview) === 'true' || req.body.isPreview === true || req.body.isPreview === 1,
+      isPublished: String(req.body.isPublished) === 'false' || req.body.isPublished === false || req.body.isPublished === 0 ? false : true,
       unlockOrder: Number(req.body.unlockOrder || 0),
       sortOrder: Number(req.body.sortOrder || 0),
     });
@@ -564,9 +572,12 @@ const updateLesson = async (req, res, next) => {
   try {
     const { lesson, course } = await ensureLessonAccess(req.params.lessonId, req.user);
 
+    // FIX LỖI 422: Ép kiểu Number rõ ràng cho sectionId nhận từ FormData tránh treo Schema Validate
+    const targetSectionId = req.body.sectionId ? Number(req.body.sectionId) : lesson.sectionId;
+
     const section = await CourseSection.findOne({
       where: {
-        id: req.body.sectionId,
+        id: targetSectionId,
         courseId: course.id,
       },
     });
@@ -578,15 +589,26 @@ const updateLesson = async (req, res, next) => {
       });
     }
 
+    let documentUrl = lesson.documentUrl;
+    if (req.file) {
+      documentUrl = `/uploads/documents/${req.file.filename}`;
+    } else if (req.body.documentUrl !== undefined) {
+      documentUrl = req.body.documentUrl;
+    }
+
+    
     lesson.sectionId = section.id;
-    lesson.title = req.body.title;
-    lesson.lessonType = req.body.lessonType;
-    lesson.content = req.body.content || null;
-    lesson.videoUrl = req.body.videoUrl || null;
-    lesson.documentUrl = req.body.documentUrl || null; // Fix BUG_011
-    lesson.durationSeconds = req.body.durationSeconds || null;
-    lesson.isPreview = Boolean(req.body.isPreview);
-    lesson.isPublished = req.body.isPublished !== undefined ? Boolean(req.body.isPublished) : true;
+    lesson.title = req.body.title || lesson.title;
+    lesson.lessonType = req.body.lessonType || lesson.lessonType;
+    lesson.content = req.body.content !== undefined ? req.body.content : lesson.content;
+    lesson.videoUrl = req.body.videoUrl !== undefined ? req.body.videoUrl : lesson.videoUrl;
+    lesson.documentUrl = documentUrl; 
+    lesson.durationSeconds = req.body.durationSeconds ? Number(req.body.durationSeconds) : null;
+    
+    
+    lesson.isPreview = String(req.body.isPreview) === 'true' || req.body.isPreview === true || req.body.isPreview === 1;
+    lesson.isPublished = !(String(req.body.isPublished) === 'false' || req.body.isPublished === false || req.body.isPublished === 0);
+    
     lesson.unlockOrder = Number(req.body.unlockOrder || 0);
     lesson.sortOrder = Number(req.body.sortOrder || 0);
 

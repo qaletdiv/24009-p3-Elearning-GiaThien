@@ -40,6 +40,7 @@ const loadCourseForLearning = async (slug) => {
               'lessonType',
               'content',
               'videoUrl',
+              'documentUrl', // Đảm bảo lấy documentUrl cho BUG_006
               'durationSeconds',
               'isPreview',
               'isPublished',
@@ -107,6 +108,8 @@ const buildLearningState = (course, progressMap, previewMode) => {
   flatLessons.forEach((lesson, index) => {
     const prevLesson = flatLessons[index - 1];
     const isCompleted = Boolean(progressMap.get(lesson.id));
+    
+    // Logic mở khóa: PreviewMode (Admin/GV) hoặc Bài học Preview hoặc Bài đầu tiên hoặc Bài trước đã xong
     const isUnlocked =
       previewMode ||
       lesson.isPreview ||
@@ -166,32 +169,30 @@ const getLearningData = async (req, res, next) => {
 
     const previewMode = canPreviewCourse(req.user);
 
-    let enrollment = null;
-    if (!previewMode) {
-      enrollment = await Enrollment.findOne({
-        where: {
-          userId: req.user.id,
-          courseId: course.id,
-        },
-      });
+    // Tìm bài học đang yêu cầu hoặc bài học mặc định
+    const flatLessons = flattenLessons(course);
+    const currentLessonData = requestedLessonId 
+        ? flatLessons.find(l => l.id === requestedLessonId) 
+        : flatLessons[0];
 
-      if (!enrollment) {
-        return res.status(403).json({
-          success: false,
-          message: 'Bạn chưa sở hữu khóa học này',
-        });
-      }
-    } else {
-      enrollment = await Enrollment.findOne({
-        where: {
-          userId: req.user.id,
-          courseId: course.id,
-        },
+    // Kiểm tra quyền sở hữu (Enrollment)
+    const enrollment = await Enrollment.findOne({
+      where: {
+        userId: req.user.id,
+        courseId: course.id,
+      },
+    });
+
+    // SỬA LOGIC TẠI ĐÂY: Nếu không phải Admin/GV VÀ không phải bài học Preview VÀ không có enrollment
+    if (!previewMode && (!currentLessonData || !currentLessonData.isPreview) && !enrollment) {
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn chưa sở hữu khóa học này',
       });
     }
 
     const progressMap = await getLessonProgressMap(enrollment?.id);
-    const { flatLessons, sections, lessonStateMap } = buildLearningState(course, progressMap, previewMode);
+    const { sections, lessonStateMap } = buildLearningState(course, progressMap, previewMode);
 
     if (flatLessons.length === 0) {
       return res.status(200).json({
@@ -206,29 +207,17 @@ const getLearningData = async (req, res, next) => {
           },
           sections,
           currentLesson: null,
-          navigation: {
-            previousLesson: null,
-            nextLesson: null,
-          },
-          previewMode,
+          navigation: { previousLesson: null, nextLesson: null },
+          previewMode: previewMode || (!enrollment && currentLessonData?.isPreview),
           progressPercent: Number(enrollment?.progressPercent || 0),
         },
       });
     }
 
-    const fallbackLesson = flatLessons.find((lesson) => lessonStateMap.get(lesson.id)?.isUnlocked) || flatLessons[0];
-    const currentLesson = requestedLessonId
-      ? flatLessons.find((lesson) => lesson.id === requestedLessonId)
-      : fallbackLesson;
-
-    if (!currentLesson) {
-      return res.status(404).json({
-        success: false,
-        message: 'Không tìm thấy bài học',
-      });
-    }
-
+    const currentLesson = currentLessonData || flatLessons[0];
     const currentState = lessonStateMap.get(currentLesson.id);
+
+    // Kiểm tra mở khóa (Ví dụ bài preview thì luôn mở, Admin luôn mở)
     if (!currentState?.isUnlocked) {
       return res.status(403).json({
         success: false,
@@ -286,7 +275,8 @@ const getLearningData = async (req, res, next) => {
               }
             : null,
         },
-        previewMode,
+        // Chế độ xem trước được kích hoạt nếu là Admin/GV hoặc Học viên đang xem bài Preview khi chưa mua
+        previewMode: previewMode || (!enrollment && currentLesson.isPreview),
         progressPercent: Number(enrollment?.progressPercent || 0),
       },
     });
@@ -321,14 +311,6 @@ const completeLesson = async (req, res, next) => {
     }
 
     const previewMode = canPreviewCourse(req.user);
-    if (previewMode) {
-      await transaction.rollback();
-      return res.status(200).json({
-        success: true,
-        message: 'Đang ở chế độ xem trước, không lưu tiến độ',
-      });
-    }
-
     const enrollment = await Enrollment.findOne({
       where: {
         userId: req.user.id,
@@ -338,11 +320,12 @@ const completeLesson = async (req, res, next) => {
       lock: transaction.LOCK.UPDATE,
     });
 
-    if (!enrollment) {
+    // Nếu là Admin/GV hoặc là học viên xem bài preview nhưng chưa mua -> Không lưu tiến độ
+    if (previewMode || !enrollment) {
       await transaction.rollback();
-      return res.status(403).json({
-        success: false,
-        message: 'Bạn chưa sở hữu khóa học này',
+      return res.status(200).json({
+        success: true,
+        message: 'Chế độ xem trước hoặc chưa ghi danh, không lưu tiến độ',
       });
     }
 
@@ -417,39 +400,21 @@ const createDiscussion = async (req, res, next) => {
     }
 
     const course = await loadCourseForLearning(req.body.courseSlug);
-    if (!course || course.id !== lesson.courseId) {
-      return res.status(404).json({
-        success: false,
-        message: 'Không tìm thấy khóa học',
-      });
-    }
-
+    
     const previewMode = canPreviewCourse(req.user);
+    const enrollment = await Enrollment.findOne({
+      where: {
+        userId: req.user.id,
+        courseId: course.id,
+      },
+    });
 
-    if (!previewMode) {
-      const enrollment = await Enrollment.findOne({
-        where: {
-          userId: req.user.id,
-          courseId: course.id,
-        },
-      });
-
-      if (!enrollment) {
+    // Chỉ cho phép thảo luận nếu là Admin/GV hoặc đã sở hữu khóa học
+    if (!previewMode && !enrollment) {
         return res.status(403).json({
           success: false,
-          message: 'Bạn chưa sở hữu khóa học này',
+          message: 'Bạn cần sở hữu khóa học để tham gia thảo luận',
         });
-      }
-
-      const progressMap = await getLessonProgressMap(enrollment.id);
-      const { lessonStateMap } = buildLearningState(course, progressMap, false);
-
-      if (!lessonStateMap.get(lesson.id)?.isUnlocked) {
-        return res.status(403).json({
-          success: false,
-          message: 'Bài học này chưa được mở khóa',
-        });
-      }
     }
 
     const discussion = await Discussion.create({

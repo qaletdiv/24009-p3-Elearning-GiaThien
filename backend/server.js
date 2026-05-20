@@ -5,6 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs'); // Thêm fs để tự động tạo thư mục khi chạy server
 
 const sequelize = require('./config/config');
 
@@ -23,6 +24,11 @@ const errorHandler = require('./middlewares/errorHandler');
 const server = express();
 const PORT = process.env.PORT || 5000;
 
+const uploadDir = path.join(__dirname, 'uploads/documents');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
 server.use(
   cors({
     origin: process.env.FRONTEND_URL || true,
@@ -32,6 +38,7 @@ server.use(
 server.use(express.json());
 server.use(express.urlencoded({ extended: true }));
 server.use(requestLogger);
+
 
 server.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 

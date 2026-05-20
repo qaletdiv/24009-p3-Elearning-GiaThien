@@ -7,6 +7,7 @@ const authenticateToken = require('../middlewares/authenticateToken');
 const authorizeRole = require('../middlewares/authorizeRole');
 const validationErrorHandler = require('../middlewares/validationErrorHandler');
 const manageCourseController = require('../controllers/manageCourseController');
+const { uploadDocument } = require('../middlewares/uploadMiddleware');
 const {
   courseIdParamValidator,
   sectionIdParamValidator,
@@ -23,6 +24,25 @@ const {
   createQuizQuestionValidator,
   addEnrollmentValidator,
 } = require('../validators/manageCourseValidator');
+
+// Cấu hình custom middleware ép kiểu dữ liệu từ FormData (Chuỗi) về đúng kiểu dữ liệu (Number/Boolean) 
+// để vượt qua các tầng validator nghiêm ngặt phía dưới mà không bị lỗi 422
+const parseLessonFormData = (req, res, next) => {
+  if (req.body) {
+    if (req.body.sectionId) req.body.sectionId = Number(req.body.sectionId);
+    if (req.body.durationSeconds) req.body.durationSeconds = Number(req.body.durationSeconds);
+    if (req.body.unlockOrder) req.body.unlockOrder = Number(req.body.unlockOrder);
+    if (req.body.sortOrder) req.body.sortOrder = Number(req.body.sortOrder);
+    
+    if (req.body.isPreview !== undefined) {
+      req.body.isPreview = req.body.isPreview === 'true' || req.body.isPreview === true || req.body.isPreview === '1' || req.body.isPreview === 1;
+    }
+    if (req.body.isPublished !== undefined) {
+      req.body.isPublished = req.body.isPublished === 'true' || req.body.isPublished === true || req.body.isPublished === '1' || req.body.isPublished === 1;
+    }
+  }
+  next();
+};
 
 router.use(authenticateToken, authorizeRole('admin', 'instructor'));
 
@@ -85,17 +105,23 @@ router.delete(
   manageCourseController.deleteSection
 );
 
+
 router.post(
   '/courses/:courseId/lessons',
-  createLessonValidator,
-  validationErrorHandler,
+  uploadDocument.single('documentFile'), 
+  parseLessonFormData,                  
+  createLessonValidator,                 
+  validationErrorHandler,                
   manageCourseController.createLesson
 );
 
+
 router.put(
   '/lessons/:lessonId',
-  updateLessonValidator,
-  validationErrorHandler,
+  uploadDocument.single('documentFile'), 
+  parseLessonFormData,                  
+  updateLessonValidator,                 
+  validationErrorHandler,                
   manageCourseController.updateLesson
 );
 

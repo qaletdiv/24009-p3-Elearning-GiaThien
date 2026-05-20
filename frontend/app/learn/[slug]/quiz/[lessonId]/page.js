@@ -14,7 +14,6 @@ function formatTime(totalSeconds) {
 export default function QuizPage() {
   const params = useParams()
   const router = useRouter()
-
   const slug = params.slug
   const lessonId = params.lessonId
 
@@ -33,10 +32,16 @@ export default function QuizPage() {
       const res = await apiRequest(`/quizzes/courses/${slug}/lessons/${lessonId}`)
       setData(res.data)
 
-      const timeLimitMinutes = Number(res.data.quiz?.timeLimitMinutes || 0)
-      setRemainingSeconds(timeLimitMinutes > 0 ? timeLimitMinutes * 60 : null)
-      setResult(null)
-      setAnswers({})
+      const historyAttempt = res.data.lastAttempt || res.data.quizAttempt || res.data.attempt;
+      
+      if (historyAttempt) {
+        setResult(historyAttempt)
+      } else {
+        const timeLimitMinutes = Number(res.data.quiz?.timeLimitMinutes || 0)
+        setRemainingSeconds(timeLimitMinutes > 0 ? timeLimitMinutes * 60 : null)
+        setResult(null)
+        setAnswers({})
+      }
     } catch (err) {
       setError(err.message)
     } finally {
@@ -50,33 +55,6 @@ export default function QuizPage() {
     }
   }, [slug, lessonId])
 
-  const handleSubmit = async () => {
-    if (!data?.quiz) return
-
-    try {
-      setSubmitting(true)
-      setError('')
-
-      const payload = Object.entries(answers).map(([questionId, answerId]) => ({
-        questionId: Number(questionId),
-        answerId: Number(answerId),
-      }))
-
-      const res = await apiRequest(`/quizzes/courses/${slug}/lessons/${lessonId}/submit`, {
-        method: 'POST',
-        body: JSON.stringify({
-          answers: payload,
-        }),
-      })
-
-      setResult(res.data)
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   useEffect(() => {
     if (remainingSeconds === null || result) return
 
@@ -86,89 +64,96 @@ export default function QuizPage() {
     }
 
     const timer = setInterval(() => {
-      setRemainingSeconds((prev) => (prev === null ? null : prev - 1))
+      setRemainingSeconds((prev) => (prev !== null ? prev - 1 : null))
     }, 1000)
 
     return () => clearInterval(timer)
   }, [remainingSeconds, result])
 
+  const handleSubmit = async () => {
+    if (!data?.quiz) return
+    try {
+      setSubmitting(true)
+      const payload = Object.entries(answers).map(([questionId, answerId]) => ({
+        questionId: Number(questionId),
+        answerId: Number(answerId),
+      }))
+      const res = await apiRequest(`/quizzes/courses/${slug}/lessons/${lessonId}/submit`, {
+        method: 'POST',
+        body: JSON.stringify({ answers: payload }),
+      })
+      setResult(res.data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  // Hàm xử lý tái thiết lập trạng thái để học viên làm lại bài ôn tập
+  const handleRetake = () => {
+    setResult(null)
+    setAnswers({})
+    const timeLimitMinutes = Number(data?.quiz?.timeLimitMinutes || 0)
+    setRemainingSeconds(timeLimitMinutes > 0 ? timeLimitMinutes * 60 : null)
+  }
+
   const totalAnswered = useMemo(() => {
     return Object.keys(answers).length
   }, [answers])
 
-  if (loading) {
-    return (
-      <section className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="rounded-[32px] border border-dashed border-slate-300 bg-white p-10 text-center text-slate-500">
-          Đang tải bài kiểm tra...
-        </div>
-      </section>
-    )
-  }
-
-  if (error || !data) {
-    return (
-      <section className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="rounded-[32px] bg-red-50 p-6 text-red-600">{error || 'Không tải được bài kiểm tra'}</div>
-      </section>
-    )
-  }
+  if (loading) return <div className="p-10 text-center text-slate-500">Đang tải bài kiểm tra...</div>
+  if (error) return <div className="p-10 text-center text-red-500">{error}</div>
+  if (!data?.quiz) return <div className="p-10 text-center text-slate-500">Không tìm thấy dữ liệu bài kiểm tra.</div>
 
   return (
-    <section className="w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      <div className="mb-8 flex flex-col gap-4 rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm md:flex-row md:items-center md:justify-between md:p-8">
+    <section className="w-full max-w-5xl mx-auto px-4 py-10">
+      <div className="mb-8 flex flex-col gap-4 rounded-[32px] border border-slate-200 bg-white p-8 md:flex-row md:items-center md:justify-between">
         <div>
-          <p className="text-sm font-semibold uppercase tracking-[0.16em] text-blue-600">A.7 Làm bài kiểm tra</p>
           <h1 className="mt-2 text-2xl font-bold text-slate-900 md:text-3xl">{data.quiz.title}</h1>
-          <p className="mt-2 text-sm text-slate-600">
-            Cần đạt tối thiểu {data.quiz.passScore}% để vượt qua bài kiểm tra.
-          </p>
+          <p className="text-sm text-slate-600 mt-1">Yêu cầu đạt: <span className="font-semibold text-slate-900">{data.quiz.passScore}%</span> để vượt qua bài kiểm tra.</p>
         </div>
-
-        <div className="rounded-[24px] bg-slate-900 px-5 py-4 text-white">
-          <p className="text-xs uppercase tracking-[0.12em] text-slate-300">Thời gian còn lại</p>
-          <p className="mt-1 text-2xl font-bold">
-            {remainingSeconds === null ? 'Không giới hạn' : formatTime(Math.max(remainingSeconds, 0))}
-          </p>
-        </div>
+        {!result && remainingSeconds !== null && (
+          <div className="bg-slate-990 bg-slate-900 text-white px-6 py-3 rounded-2xl text-center min-w-[120px]">
+            <p className="text-xs text-slate-400 uppercase tracking-wider">Thời gian còn lại</p>
+            <p className="text-xl font-bold mt-0.5">{formatTime(remainingSeconds)}</p>
+          </div>
+        )}
       </div>
 
       {result ? (
         <div className="rounded-[32px] border border-slate-200 bg-white p-8 shadow-sm">
-          <div
-            className={`rounded-[24px] p-6 ${
-              result.isPassed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'
-            }`}
-          >
+          <div className={`rounded-[24px] p-6 ${result.isPassed ? 'bg-emerald-50 text-emerald-700' : 'bg-red-50 text-red-700'}`}>
             <h2 className="text-2xl font-bold">
               {result.isPassed ? 'Bạn đã đạt bài kiểm tra' : 'Bạn chưa đạt bài kiểm tra'}
             </h2>
-            <p className="mt-3">
-              Điểm số: <strong>{result.score}%</strong> • Đúng {result.correctCount}/{result.totalQuestions} câu
+            <p className="mt-3 text-base">
+              Điểm số: <strong>{result.score}%</strong> • Đúng {result.correctCount}/{result.totalQuestions || data.quiz.questions?.length} câu
             </p>
           </div>
-
+          
           <div className="mt-6 flex flex-wrap gap-3">
-            {result.isPassed ? (
+            {/* Thêm nút Làm lại ngay cạnh nút điều hướng chính */}
+            <Button onClick={handleRetake} variant="outline" className="border-slate-200 hover:bg-slate-50">
+              Làm lại bài thi
+            </Button>
+
+            {result.isPassed && result.nextLesson && (
               <Button
                 onClick={() => {
                   if (result.nextLesson?.lessonType === 'quiz') {
                     router.push(`/learn/${slug}/quiz/${result.nextLesson.id}`)
                     return
                   }
-
                   if (result.nextLesson?.id) {
                     router.push(`/learn/${slug}?lessonId=${result.nextLesson.id}`)
                     return
                   }
-
                   router.push(`/learn/${slug}`)
                 }}
               >
-                {result.nextLesson ? 'Tiếp tục bài học' : 'Quay về khóa học'}
+                Tiếp tục bài học
               </Button>
-            ) : (
-              <Button onClick={loadQuiz}>Làm lại</Button>
             )}
 
             <Button variant="outline" onClick={() => router.push(`/learn/${slug}`)}>
@@ -180,18 +165,18 @@ export default function QuizPage() {
         <div className="space-y-6">
           <div className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
             <p className="text-sm text-slate-600">
-              Đã trả lời {totalAnswered}/{data.quiz.questions.length} câu
+              Đã trả lời {totalAnswered}/{data.quiz.questions?.length || 0} câu
             </p>
           </div>
 
-          {data.quiz.questions.map((question, index) => (
+          {data.quiz.questions?.map((question, index) => (
             <div key={question.id} className="rounded-[32px] border border-slate-200 bg-white p-6 shadow-sm md:p-8">
               <h2 className="text-lg font-bold text-slate-900">
                 Câu {index + 1}. {question.questionText}
               </h2>
 
               <div className="mt-5 space-y-3">
-                {question.answers.map((answer) => {
+                {question.answers?.map((answer) => {
                   const isSelected = Number(answers[question.id]) === Number(answer.id)
 
                   return (
