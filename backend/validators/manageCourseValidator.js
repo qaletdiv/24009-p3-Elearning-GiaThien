@@ -120,18 +120,26 @@ const createLessonValidator = [
   body('lessonType')
     .isIn(['video', 'document', 'quiz'])
     .withMessage('lessonType không hợp lệ'),
+    
+  // FIX LỖI DỮ LIỆU KHÔNG HỢP LỆ: Cho phép trống (checkFalsy) khi Frontend gửi chuỗi rỗng ""
   body('durationSeconds')
-    .optional({ nullable: true })
+    .optional({ checkFalsy: true })
     .isInt({ min: 0 })
-    .withMessage('durationSeconds không hợp lệ'),
+    .withMessage('Thời lượng bài học phải là một số nguyên từ 0 trở lên'),
+    
+  // Xử lý custom mượt mà để nhận diện dữ liệu dạng chuỗi "true"/"false" từ FormData gửi lên
   body('isPreview')
     .optional()
-    .isBoolean()
-    .withMessage('isPreview phải là true hoặc false'),
+    .custom((val) => {
+      if (val === 'true' || val === 'false' || typeof val === 'boolean' || val === 1 || val === 0) return true;
+      throw new Error('isPreview phải là kiểu định dạng Boolean');
+    }),
   body('isPublished')
     .optional()
-    .isBoolean()
-    .withMessage('isPublished phải là true hoặc false'),
+    .custom((val) => {
+      if (val === 'true' || val === 'false' || typeof val === 'boolean' || val === 1 || val === 0) return true;
+      throw new Error('isPublished phải là kiểu định dạng Boolean');
+    }),
   body('unlockOrder')
     .optional()
     .isInt({ min: 0 })
@@ -158,18 +166,25 @@ const updateLessonValidator = [
   body('lessonType')
     .isIn(['video', 'document', 'quiz'])
     .withMessage('lessonType không hợp lệ'),
+    
+  // FIX LỖI DỮ LIỆU KHÔNG HỢP LỆ: Đồng bộ cho cả hàm cập nhật thông tin
   body('durationSeconds')
-    .optional({ nullable: true })
+    .optional({ checkFalsy: true })
     .isInt({ min: 0 })
-    .withMessage('durationSeconds không hợp lệ'),
+    .withMessage('Thời lượng bài học phải là một số nguyên từ 0 trở lên'),
+    
   body('isPreview')
     .optional()
-    .isBoolean()
-    .withMessage('isPreview phải là true hoặc false'),
+    .custom((val) => {
+      if (val === 'true' || val === 'false' || typeof val === 'boolean' || val === 1 || val === 0) return true;
+      throw new Error('isPreview phải là kiểu định dạng Boolean');
+    }),
   body('isPublished')
     .optional()
-    .isBoolean()
-    .withMessage('isPublished phải là true hoặc false'),
+    .custom((val) => {
+      if (val === 'true' || val === 'false' || typeof val === 'boolean' || val === 1 || val === 0) return true;
+      throw new Error('isPublished phải là kiểu định dạng Boolean');
+    }),
   body('unlockOrder')
     .optional()
     .isInt({ min: 0 })
@@ -221,7 +236,7 @@ const createQuizQuestionValidator = [
     .isBoolean()
     .withMessage('isCorrect phải là true hoặc false'),
   body('answers').custom((answers) => {
-    const correctCount = answers.filter((item) => item.isCorrect === true).length;
+    const correctCount = answers.filter((item) => item.isCorrect === true || String(item.isCorrect) === 'true').length;
     if (correctCount < 1) {
       throw new Error('Phải có ít nhất 1 đáp án đúng');
     }

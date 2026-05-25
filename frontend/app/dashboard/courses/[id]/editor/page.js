@@ -33,8 +33,9 @@ export default function CourseEditorPage() {
   const [newQuestionByQuiz, setNewQuestionByQuiz] = useState({})
   const [selectedFiles, setSelectedFiles] = useState({})
 
-  // Trạng thái chặn bấm liên tục khi đang lưu dữ liệu
+  // Trạng thái loading riêng biệt để tránh spam click nút
   const [isSavingLessonId, setIsSavingLessonId] = useState(null)
+  const [isCreatingLessonSectionId, setIsCreatingLessonSectionId] = useState(null)
 
   useEffect(() => {
     const user = getStoredUser()
@@ -90,19 +91,21 @@ export default function CourseEditorPage() {
 
   const sectionCount = useMemo(() => course?.sections?.length || 0, [course])
 
-  const getDefaultLessonForm = (sectionId, currentSection) => ({
-    sectionId,
-    title: '',
-    lessonType: 'video',
-    content: '',
-    videoUrl: '',
-    documentUrl: '',
-    durationSeconds: '',
-    isPreview: false,
-    isPublished: true,
-    unlockOrder: (currentSection?.lessons?.length || 0) + 1,
-    sortOrder: (currentSection?.lessons?.length || 0) + 1,
-  })
+  const getDefaultLessonForm = (sectionId, currentSection) => {
+    const nextOrder = (currentSection?.lessons?.length || 0) + 1
+    return {
+      sectionId,
+      title: '',
+      lessonType: 'video',
+      content: '',
+      videoUrl: '',
+      documentUrl: '',
+      isPreview: false,
+      isPublished: true,
+      unlockMethod: 'sequential', // Tùy chọn trực quan thay thế cho unlockOrder: 'sequential' hoặc 'free'
+      sortOrder: nextOrder,
+    }
+  }
 
   const handleCreateSection = async (e) => {
     e.preventDefault()
@@ -166,25 +169,36 @@ export default function CourseEditorPage() {
     }))
   }
 
+  // SỬA LỖI: Nút "Thêm bài học" hoạt động chuẩn xác và chống trùng lặp dữ liệu đầu vào
   const handleCreateLesson = async (sectionId, section) => {
     const form = newLessonBySection[sectionId] || getDefaultLessonForm(sectionId, section)
+    if (!form.title.trim()) {
+      setError('Vui lòng nhập tên bài học trước khi thêm.')
+      return
+    }
+
     try {
       setMessage('')
       setError('')
+      setIsCreatingLessonSectionId(sectionId)
 
       const formData = new FormData()
-      formData.append('sectionId', sectionId)
-      formData.append('title', form.title)
-      formData.append('lessonType', form.lessonType)
-      formData.append('content', form.content || '')
-      formData.append('videoUrl', form.videoUrl || '')
-      formData.append('durationSeconds', form.durationSeconds ? String(form.durationSeconds) : '')
-      formData.append('unlockOrder', String(form.unlockOrder || 0))
-      formData.append('sortOrder', String(form.sortOrder || 0))
+      formData.append('sectionId', String(sectionId))
+      formData.append('title', String(form.title.trim()))
+      formData.append('lessonType', String(form.lessonType))
+      formData.append('content', String(form.content || ''))
+      formData.append('videoUrl', form.lessonType === 'video' ? String(form.videoUrl || '') : '')
+      formData.append('durationSeconds', '') // Đặt trống (không bắt người dùng gõ tay số giây vô lý)
+
+      // Chuyển đổi logic Unlock sang dữ liệu số cho tầng điều hướng Backend nhận biết
+      const calculatedUnlockOrder = form.unlockMethod === 'sequential' ? String(form.sortOrder) : '0'
+      formData.append('unlockOrder', calculatedUnlockOrder)
+      formData.append('sortOrder', String(form.sortOrder || 1))
+      
       formData.append('isPreview', form.isPreview ? 'true' : 'false')
       formData.append('isPublished', form.isPublished ? 'true' : 'false')
 
-      if (selectedFiles[`new-${sectionId}`]) {
+      if (form.lessonType === 'document' && selectedFiles[`new-${sectionId}`]) {
         formData.append('documentFile', selectedFiles[`new-${sectionId}`])
       }
 
@@ -199,9 +213,11 @@ export default function CourseEditorPage() {
       })
 
       const resData = await response.json()
-      if (!response.ok) throw new Error(resData.message || 'Lỗi tạo bài học')
+      if (!response.ok) throw new Error(resData.message || 'Hệ thống không thể khởi tạo bài học mới')
 
-      setMessage('Tạo bài học thành công')
+      setMessage(`Thêm bài học "${form.title}" thành công!`)
+      
+      // Khởi động lại form về rỗng
       setNewLessonBySection((prev) => ({
         ...prev,
         [sectionId]: getDefaultLessonForm(sectionId, section),
@@ -216,6 +232,8 @@ export default function CourseEditorPage() {
       fetchEditorData()
     } catch (err) {
       setError(err.message)
+    } finally {
+      setIsCreatingLessonSectionId(null)
     }
   }
 
@@ -235,29 +253,30 @@ export default function CourseEditorPage() {
     }))
   }
 
-  // FIX HOÀN TOÀN LỖI NÚT LƯU BÀI KHÔNG HOẠT ĐỘNG
   const handleUpdateLesson = async (lesson) => {
     try {
       setMessage('')
       setError('')
-      setIsSavingLessonId(lesson.id) // Bật trạng thái loading cho riêng bài này
+      setIsSavingLessonId(lesson.id)
 
       const formData = new FormData()
       formData.append('sectionId', String(lesson.sectionId))
       formData.append('title', String(lesson.title || ''))
       formData.append('lessonType', String(lesson.lessonType || 'video'))
       formData.append('content', String(lesson.content || ''))
-      formData.append('videoUrl', String(lesson.videoUrl || ''))
-      formData.append('documentUrl', String(lesson.documentUrl || ''))
-      formData.append('durationSeconds', lesson.durationSeconds ? String(lesson.durationSeconds) : '')
-      formData.append('unlockOrder', String(lesson.unlockOrder || 0))
+      formData.append('videoUrl', lesson.lessonType === 'video' ? String(lesson.videoUrl || '') : '')
+      formData.append('documentUrl', lesson.lessonType === 'document' ? String(lesson.documentUrl || '') : '')
+      formData.append('durationSeconds', '') // Triệt tiêu việc validate trường số giây
+
+      // Đồng bộ hóa việc chuyển đổi UnlockOrder hiện tại sang chuỗi ký tự số an toàn
+      const finalUnlockOrder = lesson.unlockMethod === 'free' ? '0' : String(lesson.sortOrder || lesson.unlockOrder || 0)
+      formData.append('unlockOrder', finalUnlockOrder)
       formData.append('sortOrder', String(lesson.sortOrder || 0))
       
-      // Khắc phục ép kiểu an toàn tuyệt đối chống lỗi treo dữ liệu ngầm ở React
-      formData.append('isPreview', String(lesson.isPreview) === 'true' || lesson.isPreview === 1 ? 'true' : 'false')
-      formData.append('isPublished', String(lesson.isPublished) === 'false' || lesson.isPublished === 0 ? 'false' : 'true')
+      formData.append('isPreview', String(lesson.isPreview) === 'true' || lesson.isPreview === true || lesson.isPreview === 1 ? 'true' : 'false')
+      formData.append('isPublished', String(lesson.isPublished) === 'false' || lesson.isPublished === false || lesson.isPublished === 0 ? 'false' : 'true')
 
-      if (selectedFiles[lesson.id]) {
+      if (lesson.lessonType === 'document' && selectedFiles[lesson.id]) {
         formData.append('documentFile', selectedFiles[lesson.id])
       }
 
@@ -276,7 +295,7 @@ export default function CourseEditorPage() {
         throw new Error(resData.message || 'Gặp lỗi trong quá trình cập nhật thông tin bài học')
       }
 
-      setMessage(`Cập nhật bài học "${lesson.title}" thành công!`)
+      setMessage(`Cập nhật thành công thông tin bài học!`)
       
       setSelectedFiles(prev => {
         const next = { ...prev }
@@ -288,7 +307,7 @@ export default function CourseEditorPage() {
     } catch (err) {
       setError(err.message)
     } finally {
-      setIsSavingLessonId(null) // Tắt trạng thái loading
+      setIsSavingLessonId(null)
     }
   }
 
@@ -435,14 +454,14 @@ export default function CourseEditorPage() {
               <input
                 value={newSection.title}
                 onChange={(e) => setNewSection((prev) => ({ ...prev, title: e.target.value }))}
-                placeholder="Tên chương học"
+                placeholder="Tên chương học (Ví dụ: Chương 1: Giới thiệu cơ bản)"
                 className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
               />
               <input
                 type="number"
                 value={newSection.sortOrder}
                 onChange={(e) => setNewSection((prev) => ({ ...prev, sortOrder: e.target.value }))}
-                placeholder="Sort"
+                placeholder="Thứ tự hiển thị"
                 className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
               />
               <Button type="submit">Thêm chương</Button>
@@ -455,9 +474,9 @@ export default function CourseEditorPage() {
 
               return (
                 <div key={section.id} className="rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
-                  <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end">
+                  <div className="mb-5 flex flex-col gap-3 md:flex-row md:items-end border-b border-slate-100 pb-5">
                     <div className="flex-1">
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Chương {sectionIndex + 1}</label>
+                      <label className="mb-2 block text-xs font-bold text-slate-400 uppercase tracking-wider">Chương {sectionIndex + 1}</label>
                       <input
                         value={section.title}
                         onChange={(e) =>
@@ -468,12 +487,12 @@ export default function CourseEditorPage() {
                             ),
                           }))
                         }
-                        className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                        className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600 font-semibold"
                       />
                     </div>
 
                     <div className="w-full md:w-40">
-                      <label className="mb-2 block text-sm font-medium text-slate-700">Sort</label>
+                      <label className="mb-2 block text-xs font-bold text-slate-400 uppercase tracking-wider">Thứ tự hiển thị</label>
                       <input
                         type="number"
                         value={section.sortOrder}
@@ -490,117 +509,151 @@ export default function CourseEditorPage() {
                     </div>
 
                     <div className="flex gap-2">
-                      <Button type="button" variant="outline" onClick={() => handleUpdateSection(section)}>Lưu chương</Button>
+                      <Button type="button" variant="outline" onClick={() => handleUpdateSection(section)}>Lưu tên chương</Button>
                       <Button type="button" variant="outline" onClick={() => handleDeleteSection(section.id)}>Xóa chương</Button>
                     </div>
                   </div>
 
-                  <div className="rounded-[24px] bg-slate-50 p-4">
-                    <h3 className="mb-4 text-lg font-semibold text-slate-900">Thêm bài học</h3>
+                  {/* THIẾT KẾ MỚI TRỰC QUAN CHO FORM "THÊM BÀI HỌC" */}
+                  <div className="rounded-[24px] bg-slate-50 p-5 border border-slate-200">
+                    <h3 className="mb-4 text-base font-bold text-slate-800 flex items-center gap-2">
+                      <span className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-xs text-white">+</span>
+                      Thêm bài học mới vào chương này
+                    </h3>
+                    
                     <div className="grid gap-4 md:grid-cols-2">
-                      <input
-                        value={lessonForm.title}
-                        onChange={(e) => handleLessonFormChange(section.id, 'title', e.target.value, section)}
-                        placeholder="Tên bài học"
-                        className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                      />
-
-                      <select
-                        value={lessonForm.lessonType}
-                        onChange={(e) => handleLessonFormChange(section.id, 'lessonType', e.target.value, section)}
-                        className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                      >
-                        <option value="video">Video</option>
-                        <option value="document">Document</option>
-                        <option value="quiz">Quiz</option>
-                      </select>
-
-                      {lessonForm.lessonType === 'video' ? (
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Tên bài học</label>
                         <input
-                          value={lessonForm.videoUrl}
-                          onChange={(e) => handleLessonFormChange(section.id, 'videoUrl', e.target.value, section)}
-                          placeholder="Youtube embed / video URL"
+                          value={lessonForm.title}
+                          onChange={(e) => handleLessonFormChange(section.id, 'title', e.target.value, section)}
+                          placeholder="Ví dụ: Bài 1: Tổng quan quy trình hoạt động"
                           className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                         />
-                      ) : lessonForm.lessonType === 'document' ? (
-                        <div className="flex items-center w-full rounded-2xl bg-white px-4 py-1.5 ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-blue-600">
+                      </div>
+
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Định dạng phân phối bài học</label>
+                        <select
+                          value={lessonForm.lessonType}
+                          onChange={(e) => handleLessonFormChange(section.id, 'lessonType', e.target.value, section)}
+                          className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                        >
+                          <option value="video">Bài học Video (Nhúng URL Youtube / Bên ngoài)</option>
+                          <option value="document">Bài học Document (Tải file tài liệu, PDF, Word)</option>
+                          <option value="quiz">Bài tập trắc nghiệm</option>
+                        </select>
+                      </div>
+
+                     
+                      {lessonForm.lessonType === 'video' && (
+                        <div className="md:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Đường dẫn liên kết Video</label>
                           <input
-                            type="file"
-                            onChange={(e) => setSelectedFiles(prev => ({ ...prev, [`new-${section.id}`]: e.target.files[0] }))}
-                            className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            value={lessonForm.videoUrl}
+                            onChange={(e) => handleLessonFormChange(section.id, 'videoUrl', e.target.value, section)}
+                            placeholder="Dán link Video Youtube embed hoặc MP4 URL tại đây..."
+                            className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                           />
                         </div>
-                      ) : null}
+                      )}
 
-                      <input
-                        type="number"
-                        value={lessonForm.durationSeconds}
-                        onChange={(e) => handleLessonFormChange(section.id, 'durationSeconds', e.target.value, section)}
-                        placeholder="Thời lượng (giây)"
-                        className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                      />
+                      {lessonForm.lessonType === 'document' && (
+                        <div className="md:col-span-2">
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Chọn file đính kèm từ máy tính</label>
+                          <div className="flex items-center w-full rounded-2xl bg-white px-4 py-1.5 ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-blue-600">
+                            <input
+                              type="file"
+                              onChange={(e) => setSelectedFiles(prev => ({ ...prev, [`new-${section.id}`]: e.target.files[0] }))}
+                              className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                            />
+                          </div>
+                        </div>
+                      )}
 
-                      <input
-                        type="number"
-                        value={lessonForm.sortOrder}
-                        onChange={(e) => handleLessonFormChange(section.id, 'sortOrder', e.target.value, section)}
-                        placeholder="Sort order"
-                        className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                      />
-
-                      <input
-                        type="number"
-                        value={lessonForm.unlockOrder}
-                        onChange={(e) => handleLessonFormChange(section.id, 'unlockOrder', e.target.value, section)}
-                        placeholder="Unlock order"
-                        className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                      />
-
-                      <label className="inline-flex items-center gap-3 rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-inset ring-slate-200">
+                      {/* Thay đổi Sort Order & Unlock Order thành giao diện mô tả trực quan, dễ hiểu */}
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Thứ tự hiển thị bài học này</label>
                         <input
-                          type="checkbox"
-                          checked={lessonForm.isPreview}
-                          onChange={(e) => handleLessonFormChange(section.id, 'isPreview', e.target.checked, section)}
+                          type="number"
+                          value={lessonForm.sortOrder}
+                          onChange={(e) => handleLessonFormChange(section.id, 'sortOrder', Number(e.target.value || 1), section)}
+                          placeholder="Ví dụ: Bài số 1, Bài số 2..."
+                          className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                         />
-                        Cho phép học thử
-                      </label>
+                      </div>
 
-                      <label className="inline-flex items-center gap-3 rounded-2xl bg-white px-4 py-3 text-sm text-slate-700 ring-1 ring-inset ring-slate-200">
-                        <input
-                          type="checkbox"
-                          checked={lessonForm.isPublished}
-                          onChange={(e) => handleLessonFormChange(section.id, 'isPublished', e.target.checked, section)}
-                        />
-                        Đã xuất bản
-                      </label>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Cấu hình điều kiện mở khóa bài</label>
+                        <select
+                          value={lessonForm.unlockMethod || 'sequential'}
+                          onChange={(e) => handleLessonFormChange(section.id, 'unlockMethod', e.target.value, section)}
+                          className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                        >
+                          <option value="sequential">Học tuần tự (Xong bài trước mới được xem bài này)</option>
+                          <option value="free">Mở khóa tự do (Học viên có thể nhảy bài tự do)</option>
+                        </select>
+                      </div>
+
+                      <div className="flex items-center gap-6 py-2">
+                        <label className="inline-flex items-center gap-3 text-sm text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={lessonForm.isPreview}
+                            onChange={(e) => handleLessonFormChange(section.id, 'isPreview', e.target.checked, section)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          Cho phép học thử (Không cần mua)
+                        </label>
+
+                        <label className="inline-flex items-center gap-3 text-sm text-slate-700 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={lessonForm.isPublished}
+                            onChange={(e) => handleLessonFormChange(section.id, 'isPublished', e.target.checked, section)}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          Phát hành công khai
+                        </label>
+                      </div>
 
                       <div className="md:col-span-2">
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Nội dung văn bản / Ghi chú đính kèm bài học</label>
                         <textarea
                           value={lessonForm.content}
                           onChange={(e) => handleLessonFormChange(section.id, 'content', e.target.value, section)}
-                          rows={4}
-                          placeholder="Nội dung bài học / Mô tả tài liệu"
+                          rows={3}
+                          placeholder="Nhập nội dung bài học chữ hoặc mô tả tài liệu hướng dẫn học viên tại đây..."
                           className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                         />
                       </div>
                     </div>
 
                     <div className="mt-4">
-                      <Button type="button" onClick={() => handleCreateLesson(section.id, section)}>Thêm bài học</Button>
+                      <Button 
+                        type="button" 
+                        onClick={() => handleCreateLesson(section.id, section)}
+                        disabled={isCreatingLessonSectionId === section.id}
+                      >
+                        {isCreatingLessonSectionId === section.id ? 'Đang khởi tạo bài học...' : '✓ Xác nhận thêm bài học'}
+                      </Button>
                     </div>
                   </div>
 
+                  {/* THIỂT KẾ CHI TIẾT DANH SÁCH BÀI HỌC CŨ ĐÃ LƯU TRONG CƠ SỞ DỮ LIỆU */}
                   <div className="mt-6 space-y-4">
                     {(section.lessons || []).map((lesson) => {
                       const quizForm = quizFormByLesson[lesson.id] || { title: `${lesson.title} - Quiz`, passScore: 80, timeLimitMinutes: '' }
                       const questionForm = lesson.quiz?.id ? newQuestionByQuiz[lesson.quiz.id] || { ...emptyQuestionForm } : { ...emptyQuestionForm }
 
                       return (
-                        <div key={lesson.id} className="rounded-[24px] border border-slate-200 p-4 bg-white">
-                          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                            <h4 className="text-lg font-semibold text-slate-900">Bài: {lesson.title}</h4>
+                        <div key={lesson.id} className="rounded-[24px] border border-slate-200 p-5 bg-white shadow-inner">
+                          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-dashed border-slate-100 pb-3">
+                            <h4 className="text-sm font-bold text-slate-700 flex items-center gap-2">
+                              <span className="inline-block h-2 w-2 rounded-full bg-emerald-500"></span>
+                              Bài học: {lesson.title}
+                            </h4>
                             <div className="flex gap-2">
-                              {/* Tích hợp trạng thái Disabled và Text đổi động để chống bấm spam */}
                               <Button 
                                 type="button" 
                                 variant="outline" 
@@ -615,34 +668,42 @@ export default function CourseEditorPage() {
 
                           <div className="grid gap-4 md:grid-cols-2">
                             <div className="md:col-span-2">
-                              <label className="text-xs font-bold text-slate-400 uppercase mb-1 block">Tên bài học</label>
+                              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Tên bài học</label>
                               <input
                                 value={lesson.title}
                                 onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'title', e.target.value)}
-                                placeholder="Tên bài học"
                                 className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                               />
                             </div>
 
-                            <select
-                              value={lesson.lessonType}
-                              onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'lessonType', e.target.value)}
-                              className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                            >
-                              <option value="video">Video</option>
-                              <option value="document">Document</option>
-                              <option value="quiz">Quiz</option>
-                            </select>
-
-                            {lesson.lessonType === 'video' ? (
-                              <input
-                                value={lesson.videoUrl || ''}
-                                onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'videoUrl', e.target.value)}
-                                placeholder="Youtube embed / video URL"
+                            <div>
+                              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Định dạng bài học</label>
+                              <select
+                                value={lesson.lessonType}
+                                onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'lessonType', e.target.value)}
                                 className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                              />
-                            ) : lesson.lessonType === 'document' ? (
+                              >
+                                <option value="video">Video</option>
+                                <option value="document">Document</option>
+                                <option value="quiz">Quiz</option>
+                              </select>
+                            </div>
+
+                            {/* Trường dữ liệu động thông minh tương ứng định dạng cũ */}
+                            {lesson.lessonType === 'video' && (
+                              <div>
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Đường dẫn liên kết Video</label>
+                                <input
+                                  value={lesson.videoUrl || ''}
+                                  onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'videoUrl', e.target.value)}
+                                  className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                                />
+                              </div>
+                            )}
+
+                            {lesson.lessonType === 'document' && (
                               <div className="flex flex-col gap-1 w-full">
+                                <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Tải tài liệu mới thay thế</label>
                                 <div className="flex items-center w-full rounded-2xl bg-slate-50 px-4 py-1.5 ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-blue-600">
                                   <input
                                     type="file"
@@ -651,98 +712,116 @@ export default function CourseEditorPage() {
                                   />
                                 </div>
                                 {lesson.documentUrl && (
-                                  <p className="text-xs text-slate-400 pl-2 truncate">
-                                    File cũ: <a href={`http://localhost:5000${lesson.documentUrl}`} target="_blank" rel="noreferrer" className="text-blue-500 underline hover:text-blue-600">{lesson.documentUrl}</a>
+                                  <p className="text-xs text-slate-400 pl-2 truncate mt-1">
+                                    Tệp đính kèm hiện tại: <a href={`http://localhost:5000${lesson.documentUrl}`} target="_blank" rel="noreferrer" className="text-blue-500 underline hover:text-blue-600 font-medium">{lesson.documentUrl}</a>
                                   </p>
                                 )}
                               </div>
-                            ) : (
-                              <div />
                             )}
 
-                            <input
-                              type="number"
-                              value={lesson.durationSeconds || ''}
-                              onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'durationSeconds', e.target.value)}
-                              placeholder="Thời lượng (giây)"
-                              className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                            />
+                            {lesson.lessonType === 'quiz' && <div />}
 
-                            <input
-                              type="number"
-                              value={lesson.sortOrder}
-                              onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'sortOrder', e.target.value)}
-                              placeholder="Sort order"
-                              className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                            />
-
-                            <label className="inline-flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700 cursor-pointer">
+                            <div>
+                              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Thứ tự hiển thị</label>
                               <input
-                                type="checkbox"
-                                checked={String(lesson.isPreview) === 'true' || lesson.isPreview === true || lesson.isPreview === 1}
-                                onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'isPreview', e.target.checked)}
+                                type="number"
+                                value={lesson.sortOrder}
+                                onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'sortOrder', Number(e.target.value || 0))}
+                                className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                               />
-                              Cho phép học thử
-                            </label>
+                            </div>
 
-                            <label className="inline-flex items-center gap-3 rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-700 cursor-pointer">
-                              <input
-                                type="checkbox"
-                                checked={String(lesson.isPublished) === 'true' || lesson.isPublished === true || lesson.isPublished === 1}
-                                onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'isPublished', e.target.checked)}
-                              />
-                              Đã xuất bản
-                            </label>
+                            <div>
+                              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Quy tắc mở khóa bài</label>
+                              <select
+                                value={lesson.unlockMethod || (Number(lesson.unlockOrder) === 0 ? 'free' : 'sequential')}
+                                onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'unlockMethod', e.target.value)}
+                                className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                              >
+                                <option value="sequential">Học tuần tự (Bài trước xong mới được xem)</option>
+                                <option value="free">Mở khóa tự do (Có thể tự do nhảy bài)</option>
+                              </select>
+                            </div>
+
+                            <div className="flex items-center gap-6 py-2">
+                              <label className="inline-flex items-center gap-3 text-sm text-slate-700 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(lesson.isPreview) || lesson.isPreview === 1}
+                                  onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'isPreview', e.target.checked)}
+                                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                Học thử không mua
+                              </label>
+
+                              <label className="inline-flex items-center gap-3 text-sm text-slate-700 cursor-pointer">
+                                <input
+                                  type="checkbox"
+                                  checked={Boolean(lesson.isPublished) || lesson.isPublished === 1}
+                                  onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'isPublished', e.target.checked)}
+                                  className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                                />
+                                Công khai bài học
+                              </label>
+                            </div>
 
                             <div className="md:col-span-2">
+                              <label className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1 block">Nội dung / Mô tả giáo án bài học</label>
                               <textarea
                                 value={lesson.content || ''}
                                 onChange={(e) => handleLessonFieldChange(section.id, lesson.id, 'content', e.target.value)}
-                                rows={4}
-                                placeholder="Nội dung bài học"
+                                rows={3}
                                 className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                               />
                             </div>
                           </div>
 
+                          {/* KHU VỰC THIẾT LẬP CHI TIẾT CỦA BÀI HỌC DẠNG QUIZ */}
                           {lesson.lessonType === 'quiz' && (
-                            <div className="mt-5 rounded-[20px] bg-slate-50 p-4">
-                              <h5 className="mb-4 text-lg font-semibold text-slate-900">Thiết lập quiz</h5>
+                            <div className="mt-5 rounded-[20px] bg-slate-50 p-4 border border-slate-200">
+                              <h5 className="mb-4 text-sm font-bold text-slate-800">Cấu hình thông số bài trắc nghiệm (Quiz)</h5>
                               <div className="grid gap-4 md:grid-cols-3">
-                                <input
-                                  value={quizForm.title}
-                                  onChange={(e) => handleQuizFormChange(lesson.id, 'title', e.target.value)}
-                                  placeholder="Tiêu đề quiz"
-                                  className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                                />
-                                <input
-                                  type="number"
-                                  value={quizForm.passScore}
-                                  onChange={(e) => handleQuizFormChange(lesson.id, 'passScore', e.target.value)}
-                                  placeholder="Điểm đạt"
-                                  className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                                />
-                                <input
-                                  type="number"
-                                  value={quizForm.timeLimitMinutes}
-                                  onChange={(e) => handleQuizFormChange(lesson.id, 'timeLimitMinutes', e.target.value)}
-                                  placeholder="Thời gian (phút)"
-                                  className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
-                                />
+                                <div>
+                                  <label className="mb-1 block text-xs text-slate-500">Tiêu đề tiêu chuẩn</label>
+                                  <input
+                                    value={quizForm.title}
+                                    onChange={(e) => handleQuizFormChange(lesson.id, 'title', e.target.value)}
+                                    className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs text-slate-500">Tỷ lệ % để đạt (Pass score)</label>
+                                  <input
+                                    type="number"
+                                    value={quizForm.passScore}
+                                    onChange={(e) => handleQuizFormChange(lesson.id, 'passScore', e.target.value)}
+                                    className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                                  />
+                                </div>
+                                <div>
+                                  <label className="mb-1 block text-xs text-slate-500">Giới hạn thời gian làm bài (Phút)</label>
+                                  <input
+                                    type="number"
+                                    value={quizForm.timeLimitMinutes}
+                                    onChange={(e) => handleQuizFormChange(lesson.id, 'timeLimitMinutes', e.target.value)}
+                                    placeholder="Bỏ trống nếu làm tự do"
+                                    className="block w-full rounded-2xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
+                                  />
+                                </div>
                               </div>
                               <div className="mt-4">
-                                <Button type="button" onClick={() => handleSaveQuiz(lesson.id)}>Lưu quiz</Button>
+                                <Button type="button" onClick={() => handleSaveQuiz(lesson.id)}>Lưu thiết lập quiz</Button>
                               </div>
 
                               {lesson.quiz?.id && (
-                                <div className="mt-6 space-y-4">
-                                  <div className="rounded-[20px] bg-white p-4 shadow-sm">
-                                    <h6 className="mb-4 text-base font-semibold text-slate-900">Thêm câu hỏi mới</h6>
+                                <div className="mt-6 space-y-4 border-t border-slate-200 pt-5">
+                                  <div className="rounded-[20px] bg-white p-4 shadow-sm border border-slate-100">
+                                    <h6 className="mb-4 text-sm font-bold text-slate-800">Thêm câu hỏi trắc nghiệm mới</h6>
                                     <div className="space-y-4">
                                       <input
                                         value={questionForm.questionText}
                                         onChange={(e) => handleQuestionFormChange(lesson.quiz.id, 'questionText', e.target.value)}
-                                        placeholder="Nội dung câu hỏi"
+                                        placeholder="Ví dụ: Đâu là thẻ tiêu đề lớn nhất trong tài liệu HTML?"
                                         className="block w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                                       />
                                       <div className="grid gap-3 md:grid-cols-2">
@@ -751,7 +830,7 @@ export default function CourseEditorPage() {
                                             <input
                                               value={answer.answerText}
                                               onChange={(e) => handleAnswerChange(lesson.quiz.id, index, 'answerText', e.target.value)}
-                                              placeholder={`Đáp án ${index + 1}`}
+                                              placeholder={`Đáp án lựa chọn ${index + 1}`}
                                               className="block w-full rounded-xl border-0 bg-white px-4 py-3 text-sm text-slate-900 ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-blue-600"
                                             />
                                             <label className="mt-3 inline-flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
@@ -761,30 +840,31 @@ export default function CourseEditorPage() {
                                                 checked={Boolean(answer.isCorrect)}
                                                 onChange={() => handleChooseCorrectAnswer(lesson.quiz.id, index)}
                                               />
-                                              Đáp án đúng
+                                              Đánh dấu đây là đáp án đúng
                                             </label>
                                           </div>
                                         ))}
                                       </div>
-                                      <Button type="button" onClick={() => handleCreateQuestion(lesson.quiz.id)}>Xác nhận thêm câu hỏi</Button>
+                                      <Button type="button" onClick={() => handleCreateQuestion(lesson.quiz.id)}>Xác nhận thêm câu hỏi vào bộ đề</Button>
                                     </div>
                                   </div>
 
                                   <div className="space-y-3">
+                                    <p className="text-xs font-bold text-slate-400 uppercase tracking-wider pl-1">Danh sách bộ câu hỏi hiện tại ({lesson.quiz.questions?.length || 0} câu)</p>
                                     {(lesson.quiz.questions || []).map((question, questionIndex) => (
-                                      <div key={question.id} className="rounded-[20px] bg-white p-5 border border-slate-100">
+                                      <div key={question.id} className="rounded-[20px] bg-white p-5 border border-slate-100 shadow-sm">
                                         <div className="flex items-start justify-between gap-3">
                                           <div className="flex-1">
-                                            <p className="font-semibold text-slate-900">Câu {questionIndex + 1}. {question.questionText}</p>
+                                            <p className="font-semibold text-slate-900 text-sm">Câu {questionIndex + 1}: {question.questionText}</p>
                                             <div className="mt-3 grid gap-2 md:grid-cols-2">
                                               {(question.answers || []).map((answer) => (
                                                 <div
                                                   key={answer.id}
-                                                  className={`rounded-xl px-3 py-2 text-xs font-medium ${
-                                                    answer.isCorrect ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100' : 'bg-slate-50 text-slate-600'
+                                                  className={`rounded-xl px-3 py-2.5 text-xs font-medium ${
+                                                    answer.isCorrect ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100 font-semibold' : 'bg-slate-50 text-slate-600'
                                                   }`}
                                                 >
-                                                  {answer.answerText} {answer.isCorrect && '✓'}
+                                                  {answer.answerText} {answer.isCorrect && ' ✓ (Đáp án đúng)'}
                                                 </div>
                                               ))}
                                             </div>
@@ -792,9 +872,9 @@ export default function CourseEditorPage() {
                                           <button
                                             type="button"
                                             onClick={() => handleDeleteQuestion(question.id)}
-                                            className="text-xs font-bold text-red-400 hover:text-red-600 transition"
+                                            className="text-xs font-bold text-red-400 hover:text-red-600 transition bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-xl"
                                           >
-                                            Xóa
+                                            Xóa câu này
                                           </button>
                                         </div>
                                       </div>

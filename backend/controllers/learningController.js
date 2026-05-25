@@ -40,7 +40,7 @@ const loadCourseForLearning = async (slug) => {
               'lessonType',
               'content',
               'videoUrl',
-              'documentUrl', // Đảm bảo lấy documentUrl cho BUG_006
+              'documentUrl',
               'durationSeconds',
               'isPreview',
               'isPublished',
@@ -109,7 +109,6 @@ const buildLearningState = (course, progressMap, previewMode) => {
     const prevLesson = flatLessons[index - 1];
     const isCompleted = Boolean(progressMap.get(lesson.id));
     
-    // Logic mở khóa: PreviewMode (Admin/GV) hoặc Bài học Preview hoặc Bài đầu tiên hoặc Bài trước đã xong
     const isUnlocked =
       previewMode ||
       lesson.isPreview ||
@@ -169,13 +168,11 @@ const getLearningData = async (req, res, next) => {
 
     const previewMode = canPreviewCourse(req.user);
 
-    // Tìm bài học đang yêu cầu hoặc bài học mặc định
     const flatLessons = flattenLessons(course);
     const currentLessonData = requestedLessonId 
         ? flatLessons.find(l => l.id === requestedLessonId) 
         : flatLessons[0];
 
-    // Kiểm tra quyền sở hữu (Enrollment)
     const enrollment = await Enrollment.findOne({
       where: {
         userId: req.user.id,
@@ -183,7 +180,6 @@ const getLearningData = async (req, res, next) => {
       },
     });
 
-    // SỬA LOGIC TẠI ĐÂY: Nếu không phải Admin/GV VÀ không phải bài học Preview VÀ không có enrollment
     if (!previewMode && (!currentLessonData || !currentLessonData.isPreview) && !enrollment) {
       return res.status(403).json({
         success: false,
@@ -217,7 +213,6 @@ const getLearningData = async (req, res, next) => {
     const currentLesson = currentLessonData || flatLessons[0];
     const currentState = lessonStateMap.get(currentLesson.id);
 
-    // Kiểm tra mở khóa (Ví dụ bài preview thì luôn mở, Admin luôn mở)
     if (!currentState?.isUnlocked) {
       return res.status(403).json({
         success: false,
@@ -275,7 +270,6 @@ const getLearningData = async (req, res, next) => {
               }
             : null,
         },
-        // Chế độ xem trước được kích hoạt nếu là Admin/GV hoặc Học viên đang xem bài Preview khi chưa mua
         previewMode: previewMode || (!enrollment && currentLesson.isPreview),
         progressPercent: Number(enrollment?.progressPercent || 0),
       },
@@ -320,7 +314,6 @@ const completeLesson = async (req, res, next) => {
       lock: transaction.LOCK.UPDATE,
     });
 
-    // Nếu là Admin/GV hoặc là học viên xem bài preview nhưng chưa mua -> Không lưu tiến độ
     if (previewMode || !enrollment) {
       await transaction.rollback();
       return res.status(200).json({
@@ -409,7 +402,6 @@ const createDiscussion = async (req, res, next) => {
       },
     });
 
-    // Chỉ cho phép thảo luận nếu là Admin/GV hoặc đã sở hữu khóa học
     if (!previewMode && !enrollment) {
         return res.status(403).json({
           success: false,
@@ -444,8 +436,61 @@ const createDiscussion = async (req, res, next) => {
   }
 };
 
+const enrollFreeCourse = async (req, res, next) => {
+  try {
+    const courseId = Number(req.params.courseId || 0);
+    const userId = req.user.id;
+
+    // 1. Kiểm tra sự tồn tại của khóa học và xem khóa đó có thực sự miễn phí không
+    const course = await Course.findByPk(courseId);
+    if (!course) {
+      return res.status(404).json({
+        success: false,
+        message: 'Không tìm thấy khóa học tương ứng.',
+      });
+    }
+
+    if (!course.isFree && Number(course.price) > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Khóa học này yêu cầu thanh toán, không thể đăng ký miễn phí.',
+      });
+    }
+
+    // 2. Kiểm tra xem người dùng hiện tại đã sở hữu / ghi danh khóa học này chưa
+    const existingEnrollment = await Enrollment.findOne({
+      where: { userId, courseId },
+    });
+
+    if (existingEnrollment) {
+      return res.status(200).json({
+        success: true,
+        message: 'Bạn đã đăng ký khóa học này rồi.',
+        data: existingEnrollment,
+      });
+    }
+
+    // 3. Tiến hành lưu bản ghi ghi danh (Enrollment) mới thẳng vào Database
+    const enrollment = await Enrollment.create({
+      userId,
+      courseId,
+      enrolledAt: new Date(),
+      progressPercent: 0,
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'Đăng ký tham gia khóa học miễn phí thành công!',
+      data: enrollment,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   getLearningData,
   completeLesson,
   createDiscussion,
+  enrollFreeCourse, 
 };

@@ -159,13 +159,32 @@ export default function LearningPage() {
     }
 
     if (lesson.lessonType === 'document') {
+      // Xác định URL đầy đủ trỏ về cổng 5000 của Backend
+      const fullDocumentUrl = lesson.documentUrl
+        ? lesson.documentUrl.startsWith('http')
+          ? lesson.documentUrl
+          : `http://localhost:5000${lesson.documentUrl}`
+        : null
+
       return (
         <div className="flex h-full flex-col overflow-y-auto bg-white p-8">
           <h3 className="text-2xl font-bold mb-4">{lesson.title}</h3>
-          {lesson.documentUrl && (
-            <a href={lesson.documentUrl} target="_blank" className="mb-4 inline-block text-blue-600 underline">Tải tài liệu</a>
+
+          {fullDocumentUrl && (
+            <div className="mb-6 flex items-center gap-2">
+              <a
+                href={fullDocumentUrl}
+                target="_blank"
+                rel="noreferrer"
+                download
+                className="inline-flex items-center gap-2 rounded-xl bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 transition shadow-sm border border-blue-100"
+              >
+                Tải tài liệu bài học 
+              </a>
+            </div>
           )}
-          <div className="prose max-w-none" dangerouslySetInnerHTML={{ __html: lesson.content?.replace(/\n/g, '<br />') }} />
+
+          <div className="prose max-w-none text-slate-700 leading-8" dangerouslySetInnerHTML={{ __html: lesson.content?.replace(/\n/g, '<br />') }} />
         </div>
       )
     }

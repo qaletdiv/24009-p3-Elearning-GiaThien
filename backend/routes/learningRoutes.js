@@ -20,6 +20,13 @@ router.get(
   learningController.getLearningData
 );
 
+
+router.post(
+  '/courses/:courseId/enroll-free',
+  validationErrorHandler,
+  learningController.enrollFreeCourse
+);
+
 router.post(
   '/lessons/:lessonId/complete',
   completeLessonValidator,

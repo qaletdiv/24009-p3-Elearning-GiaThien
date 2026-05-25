@@ -21,23 +21,22 @@ export default function CourseDetailPage() {
   const [actionLoading, setActionLoading] = useState(false)
   const [currentUser, setCurrentUser] = useState(null)
 
+  const fetchCourse = async () => {
+    try {
+      setLoading(true)
+      setError('')
+      const res = await apiRequest(`/courses/${slug}`)
+      setCourse(res.data)
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
   useEffect(() => {
-    
     const user = getStoredUser()
     setCurrentUser(user)
-
-    const fetchCourse = async () => {
-      try {
-        setLoading(true)
-        setError('')
-        const res = await apiRequest(`/courses/${slug}`)
-        setCourse(res.data)
-      } catch (err) {
-        setError(err.message)
-      } finally {
-        setLoading(false)
-      }
-    }
 
     if (slug) {
       fetchCourse()
@@ -49,50 +48,66 @@ export default function CourseDetailPage() {
     return course.sections.reduce((sum, section) => sum + (section.lessons?.length || 0), 0)
   }, [course])
 
+  // CẬP NHẬT LOGIC: Chỉ coi là vai trò quản trị/giảng viên sở hữu nếu:
+  // 1. User là 'admin'
+  // 2. User là 'instructor' VÀ đồng thời là người tạo ra chính khóa học này (khớp instructorId)
   const isManagementRole = useMemo(() => {
-    return currentUser && (currentUser.role === 'admin' || currentUser.role === 'instructor')
-  }, [currentUser])
+    if (!currentUser || !course) return false
+    if (currentUser.role === 'admin') return true
+    if (currentUser.role === 'instructor' && Number(course.instructorId) === Number(currentUser.id)) return true
+    return false
+  }, [currentUser, course])
 
-  const firstLesson = useMemo(() => {
-    if (!course?.sections) return null
-    for (const section of course.sections) {
-      if (section.lessons && section.lessons.length > 0) {
-        return section.lessons[0]
-      }
-    }
-    return null
-  }, [course])
-
+  // Xử lý sự kiện click nút chính (Mua ngay / Đăng ký miễn phí / Vào học ngay)
   const handlePrimaryAction = async () => {
     if (!course) return
 
     try {
       setActionLoading(true)
-      if (isManagementRole) {
+      
+      // 1. Nếu là Admin hoặc Giảng viên CỦA CHÍNH KHÓA NÀY hoặc Học viên đã ghi danh trước đó rồi
+      if (isManagementRole || course.viewer?.isEnrolled) {
         router.push(`/learn/${course.slug}`)
         return
       }
 
+      // 2. Nếu chưa đăng nhập thì đẩy ra trang đăng nhập
       if (!currentUser) {
-        router.push(`/auth?redirect=${encodeURIComponent(`/checkout/${course.slug}`)}`)
+        const redirectUrl = course.isFree ? `/courses/${course.slug}` : `/checkout/${course.slug}`
+        router.push(`/auth?redirect=${encodeURIComponent(redirectUrl)}`)
         return
       }
 
-      if (course.viewer?.isEnrolled) {
-        router.push(`/learn/${course.slug}`)
+      // 3. Xử lý đăng ký trực tiếp nếu là khóa học miễn phí công khai
+      if (course.isFree || Number(course.price) === 0) {
+        try {
+          // Sử dụng API ghi danh khóa học miễn phí ở backend
+          const res = await apiRequest(`/learning/courses/${course.id}/enroll-free`, {
+            method: 'POST'
+          })
+          if (res.success) {
+            alert('Đăng ký khóa học thành công!')
+            router.push(`/learn/${course.slug}`)
+          }
+        } catch (enrollErr) {
+          alert(enrollErr.message || 'Không thể đăng ký khóa học miễn phí lúc này.')
+        }
         return
       }
 
+      // 4. Nếu là khóa học trả phí và học viên chưa mua (hoặc giảng viên khác muốn mua học thử)
       router.push(`/checkout/${course.slug}`)
     } finally {
       setActionLoading(false)
     }
   }
 
+  // Tối ưu hóa nhãn hiển thị tương ứng trạng thái thực tế của khóa học
   const renderActionLabel = () => {
     if (!course) return 'Mua ngay'
     if (isManagementRole) return 'Xem với tư cách Quản trị'
     if (course.viewer?.isEnrolled) return 'Vào học ngay'
+    if (course.isFree || Number(course.price) === 0) return 'Đăng ký học miễn phí'
     return 'Mua ngay'
   }
 
@@ -203,7 +218,6 @@ export default function CourseDetailPage() {
                             <p className="mt-1 text-xs text-slate-500 uppercase tracking-wider">{lesson.lessonType}</p>
                           </div>
                           <div className="text-right">
-                            {/* Admin/Instructor có thể nhấn vào bất kỳ bài nào để vào học luôn */}
                             {(isManagementRole || lesson.isPreview) ? (
                               <button 
                                 onClick={() => router.push(`/learn/${course.slug}?lessonId=${lesson.id}`)}
@@ -249,7 +263,7 @@ export default function CourseDetailPage() {
 
             {!currentUser && (
               <p className="mt-3 text-center text-sm text-slate-500">
-                Bạn cần đăng nhập để tiếp tục thanh toán.
+                Bạn cần đăng nhập để tiếp tục tham gia khóa học.
               </p>
             )}
             
