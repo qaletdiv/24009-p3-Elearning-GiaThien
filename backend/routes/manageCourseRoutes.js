@@ -44,8 +44,13 @@ const parseLessonFormData = (req, res, next) => {
   next();
 };
 
+// Áp dụng middleware xác thực tài khoản và kiểm tra vai trò hệ thống (Admin & Giảng viên)
 router.use(authenticateToken, authorizeRole('admin', 'instructor'));
 
+// API lấy danh sách toàn bộ Giảng viên (Được đặt lên đầu để tránh bị dính cơ chế so khớp nhầm tham số :courseId)
+router.get('/instructors', manageCourseController.getInstructorsList);
+
+// API tương tác tổng quan khóa học (Quản trị)
 router.get('/courses', manageCourseController.getManageCourses);
 
 router.get(
@@ -77,6 +82,7 @@ router.patch(
   manageCourseController.updateManageCourseStatus
 );
 
+// API tương tác Chương học (Section)
 router.get(
   '/courses/:courseId/editor',
   courseIdParamValidator,
@@ -105,7 +111,7 @@ router.delete(
   manageCourseController.deleteSection
 );
 
-
+// API tương tác Bài học (Lesson) có đính kèm tệp đa phương tiện FormData
 router.post(
   '/courses/:courseId/lessons',
   uploadDocument.single('documentFile'), 
@@ -114,7 +120,6 @@ router.post(
   validationErrorHandler,                
   manageCourseController.createLesson
 );
-
 
 router.put(
   '/lessons/:lessonId',
@@ -132,6 +137,7 @@ router.delete(
   manageCourseController.deleteLesson
 );
 
+// API cấu hình Bài kiểm tra (Quiz / Đề thi trắc nghiệm)
 router.post(
   '/lessons/:lessonId/quiz',
   upsertQuizValidator,
@@ -153,6 +159,7 @@ router.delete(
   manageCourseController.deleteQuestion
 );
 
+// API Quản lý danh sách Học viên ghi danh trực tiếp từ Admin
 router.get(
   '/courses/:courseId/enrollments',
   courseIdParamValidator,

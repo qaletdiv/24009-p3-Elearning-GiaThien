@@ -2,7 +2,8 @@
 
 const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
-const { Role, User } = require('../models');
+// Import thêm model Course để xử lý quan hệ phân phối khóa học cho Giảng viên
+const { Role, User, Course } = require('../models');
 
 const serializeUser = (user) => ({
   id: user.id,
@@ -16,6 +17,10 @@ const serializeUser = (user) => ({
   status: user.status,
   createdAt: user.createdAt,
   updatedAt: user.updatedAt,
+
+  assignedCourses: user.instructedCourses
+    ? user.instructedCourses.map(c => ({ id: c.id, title: c.title, slug: c.slug }))
+    : []
 });
 
 const generateTempPassword = () => {
@@ -128,6 +133,13 @@ const getUserDetail = async (req, res, next) => {
           as: 'roleInfo',
           attributes: ['id', 'code', 'name'],
         },
+        // NẠP THÊM: Danh sách các khóa học mà Giảng viên này đang được phân bổ phụ trách dạy
+        {
+          model: Course,
+          as: 'instructedCourses', // Đổi tên alias cho khớp với cấu hình hệ thống của bạn
+          required: false,
+          attributes: ['id', 'title', 'slug', 'instructorId']
+        }
       ],
     });
 
@@ -209,11 +221,18 @@ const createUser = async (req, res, next) => {
   }
 };
 
+// ==========================================
+// CẬP NHẬT: LUỒNG ĐỒNG BỘ MẢNG PHÂN PHỐI KHÓA HỌC
+// ==========================================
 const updateUser = async (req, res, next) => {
   try {
-    const { fullName, email, phone, roleId, status } = req.body;
+    const { fullName, email, phone, roleId, status, assignedCourseIds } = req.body;
+    const userId = req.params.id;
 
-    const user = await User.findByPk(req.params.id);
+    const user = await User.findByPk(userId, {
+      include: [{ model: Role, as: 'roleInfo', attributes: ['id', 'code', 'name'] }]
+    });
+
     if (!user) {
       return res.status(404).json({
         success: false,
@@ -224,9 +243,7 @@ const updateUser = async (req, res, next) => {
     const duplicatedEmail = await User.findOne({
       where: {
         email,
-        id: {
-          [Op.ne]: user.id,
-        },
+        id: { [Op.ne]: user.id },
       },
     });
 
@@ -245,13 +262,47 @@ const updateUser = async (req, res, next) => {
       });
     }
 
+    // Tiến hành cập nhật thông tin cơ bản
     user.fullName = fullName;
     user.email = email;
     user.phone = phone || null;
     user.roleId = roleId;
     user.status = status;
-
     await user.save();
+
+    // KIỂM TRA ĐỒNG BỘ: Nếu vai trò hiện tại là giảng viên và có mảng dữ liệu khóa học gửi lên
+    const isInstructor = role.code === 'instructor' || role.name?.toLowerCase()?.includes('giáo viên');
+
+    if (isInstructor && assignedCourseIds && Array.isArray(assignedCourseIds)) {
+      const targetIds = assignedCourseIds.map(Number);
+
+      // Trường hợp 1: Nếu hệ thống sử dụng mối quan hệ Nhiều - Nhiều liên kết bảng trung gian qua Sequelize BelongsToMany
+      if (typeof user.setAssignedCourses === 'function') {
+        await user.setAssignedCourses(targetIds);
+      }
+
+      // Trường hợp 2: Nếu hệ thống gán trực tiếp thông qua thay đổi cột instructorId ở bảng Courses
+      else {
+        // Gỡ bỏ phân bổ cũ của giảng viên này ra (Chỉ gỡ những khóa học gán thêm, không gỡ khóa học do họ tự tạo gốc ban đầu)
+        await Course.update(
+          { instructorId: req.user.id }, // Gán trả lại quyền quản lý tạm thời cho Admin đang đăng nhập xử lý
+          {
+            where: {
+              instructorId: user.id,
+              id: { [Op.notIn]: targetIds }
+            }
+          }
+        );
+
+        // Kích hoạt áp đặt giảng viên này phụ trách vào các khóa học mới được tick chọn
+        if (targetIds.length > 0) {
+          await Course.update(
+            { instructorId: user.id },
+            { where: { id: targetIds } }
+          );
+        }
+      }
+    }
 
     const freshUser = await User.findByPk(user.id, {
       attributes: [
@@ -271,12 +322,18 @@ const updateUser = async (req, res, next) => {
           as: 'roleInfo',
           attributes: ['id', 'code', 'name'],
         },
+        {
+          model: Course,
+          as: 'instructedCourses', // Đổi tên alias tại đây luôn
+          required: false,
+          attributes: ['id', 'title', 'slug']
+        }
       ],
     });
 
     return res.status(200).json({
       success: true,
-      message: 'Cập nhật người dùng thành công',
+      message: 'Cập nhật người dùng và phân phối khóa học thành công',
       data: serializeUser(freshUser),
     });
   } catch (error) {

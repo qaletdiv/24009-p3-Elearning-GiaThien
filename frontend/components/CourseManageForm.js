@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Button from './Button'
 import Input from './Input'
-import { apiRequest } from '../lib/api'
+import { apiRequest, getStoredUser } from '../lib/api'
 
 const defaultForm = {
   title: '',
   slug: '',
   categoryId: '',
+  instructorId: '', // Thêm thuộc tính lưu trữ ID giảng viên phụ trách
   shortDescription: '',
   description: '',
   coverImageUrl: '',
@@ -24,9 +25,11 @@ export default function CourseManageForm({ courseId = null }) {
   const router = useRouter()
   const isCreate = !courseId
 
+  const [isAdmin, setIsAdmin] = useState(false) // State xác định vai trò admin quản trị
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [categories, setCategories] = useState([])
+  const [instructors, setInstructors] = useState([]) // State lưu danh sách tất cả giảng viên hệ thống
   const [form, setForm] = useState(defaultForm)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
@@ -37,9 +40,26 @@ export default function CourseManageForm({ courseId = null }) {
         setLoading(true)
         setError('')
 
+        // 1. Kiểm tra phân quyền thực tế từ bộ nhớ client
+        const user = getStoredUser()
+        const checkAdmin = user?.role === 'admin'
+        setIsAdmin(checkAdmin)
+
+        // 2. Lấy danh sách danh mục khóa học khả dụng
         const categoriesRes = await apiRequest('/courses/categories')
         setCategories(categoriesRes.data)
 
+        // 3. Nếu là Admin, tiến hành lấy thêm danh sách tất cả Giảng viên hệ thống để điều phối
+        if (checkAdmin) {
+          try {
+            const instructorsRes = await apiRequest('/manage/instructors')
+            setInstructors(instructorsRes.data)
+          } catch (instErr) {
+            console.error('Không thể tải danh sách giảng viên:', instErr.message)
+          }
+        }
+
+        // 4. Nếu là chế độ cập nhật, tiến hành gán dữ liệu cũ lên form biên soạn
         if (!isCreate) {
           const courseRes = await apiRequest(`/manage/courses/${courseId}`)
           const course = courseRes.data
@@ -48,6 +68,7 @@ export default function CourseManageForm({ courseId = null }) {
             title: course.title || '',
             slug: course.slug || '',
             categoryId: course.categoryId ? String(course.categoryId) : '',
+            instructorId: course.instructorId ? String(course.instructorId) : '', // Đổ giá trị ID giảng viên cũ
             shortDescription: course.shortDescription || '',
             description: course.description || '',
             coverImageUrl: course.coverImageUrl || '',
@@ -88,6 +109,7 @@ export default function CourseManageForm({ courseId = null }) {
       const payload = {
         ...form,
         categoryId: form.categoryId ? Number(form.categoryId) : null,
+        instructorId: (isAdmin && form.instructorId) ? Number(form.instructorId) : null, // Gửi ID giảng viên được chỉ định nếu là Admin
         price: form.isFree ? 0 : Number(form.price || 0),
         isFree: Boolean(form.isFree),
       }
@@ -170,15 +192,50 @@ export default function CourseManageForm({ courseId = null }) {
           </select>
         </div>
 
-        <Input
-          label="Giá tiền"
-          type="number"
-          name="price"
-          value={form.price}
-          onChange={handleChange}
-          disabled={form.isFree}
-          placeholder="0"
-        />
+        {/* CHỈ HIỂN THỊ Ô CHỌN GIẢNG VIÊN NẾU NGƯỜI DÙNG LÀ ADMIN */}
+        {isAdmin ? (
+          <div>
+            <label className="mb-2 block text-sm font-medium text-slate-900">Giảng viên phụ trách</label>
+            <select
+              name="instructorId"
+              value={form.instructorId}
+              onChange={handleChange}
+              className="block w-full rounded-xl border-0 py-3 px-4 text-slate-900 shadow-sm ring-1 ring-inset ring-slate-200 focus:ring-2 focus:ring-inset focus:ring-blue-600 sm:text-sm sm:leading-6"
+            >
+              <option value="">Hệ thống mặc định gán (Chính bạn)</option>
+              {instructors.map((ins) => (
+                <option key={ins.id} value={ins.id}>
+                  {ins.fullName} ({ins.email})
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <Input
+            label="Giá tiền"
+            type="number"
+            name="price"
+            value={form.price}
+            onChange={handleChange}
+            disabled={form.isFree}
+            placeholder="0"
+          />
+        )}
+
+        {/* Đưa ô nhập giá xuống dòng dưới mở rộng không gian nếu là giao diện của Admin */}
+        {isAdmin && (
+          <div className="md:col-span-2">
+            <Input
+              label="Giá tiền"
+              type="number"
+              name="price"
+              value={form.price}
+              onChange={handleChange}
+              disabled={form.isFree}
+              placeholder="0"
+            />
+          </div>
+        )}
 
         <div className="md:col-span-2">
           <Input

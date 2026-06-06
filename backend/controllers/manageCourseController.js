@@ -124,6 +124,45 @@ const ensureQuestionAccess = async (questionId, reqUser) => {
   return { question, quiz, lesson, course };
 };
 
+// ==========================================
+// THÊM MỚI: LẤY DANH SÁCH GIẢNG VIÊN ĐỂ ASSIGN
+// ==========================================
+const getInstructorsList = async (req, res, next) => {
+  try {
+    if (req.user.role !== 'admin') {
+      return res.status(403).json({
+        success: false,
+        message: 'Bạn không có quyền lấy danh sách giảng viên',
+      });
+    }
+
+    const instructors = await User.findAll({
+      where: {
+        status: 'active'
+      },
+      include: [
+        {
+          model: Role,
+          as: 'roleInfo',
+          where: {
+            code: ['instructor', 'admin']
+          },
+          attributes: []
+        }
+      ],
+      attributes: ['id', 'fullName', 'email'],
+      order: [['fullName', 'ASC']]
+    });
+
+    return res.status(200).json({
+      success: true,
+      data: instructors,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 const getManageCourses = async (req, res, next) => {
   try {
     const page = Number(req.query.page || 1);
@@ -196,6 +235,9 @@ const getManageCourseDetail = async (req, res, next) => {
   }
 };
 
+// ==========================================
+// CẬP NHẬT: LOGIC TẠO KHÓA HỌC CHO PHÉP ASSIGN
+// ==========================================
 const createManageCourse = async (req, res, next) => {
   try {
     const {
@@ -234,7 +276,8 @@ const createManageCourse = async (req, res, next) => {
     const finalIsFree = isFree !== undefined ? Boolean(isFree) : Number(price || 0) === 0;
     const finalPrice = finalIsFree ? 0 : Number(price || 0);
     
-    const finalInstructorId = (req.user.role === 'admin' && instructorId) ? instructorId : req.user.id;
+    // FIX BUG_009: Nếu là Admin và có chọn giảng viên phụ trách, lấy instructorId đó, ngược lại mặc định gán cho mình
+    const finalInstructorId = (req.user.role === 'admin' && instructorId) ? Number(instructorId) : req.user.id;
 
     const course = await Course.create({
       instructorId: finalInstructorId,
@@ -268,6 +311,9 @@ const createManageCourse = async (req, res, next) => {
   }
 };
 
+// ==========================================
+// CẬP NHẬT: LOGIC SỬA KHÓA HỌC CHO PHÉP ASSIGN
+// ==========================================
 const updateManageCourse = async (req, res, next) => {
   try {
     const course = await ensureCourseAccess(req.params.courseId, req.user);
@@ -314,9 +360,11 @@ const updateManageCourse = async (req, res, next) => {
     const finalIsFree = isFree !== undefined ? Boolean(isFree) : (Number(price || 0) === 0);
     const finalPrice = finalIsFree ? 0 : Number(price || 0);
 
+    // FIX BUG_009: Nếu người dùng thực hiện là Admin, cho phép thay đổi giảng viên phụ trách khóa học
     if (req.user.role === 'admin' && instructorId) {
-      course.instructorId = instructorId;
+      course.instructorId = Number(instructorId);
     }
+    
     course.categoryId = categoryId || null;
     course.title = title;
     course.slug = slug;
@@ -520,7 +568,6 @@ const createLesson = async (req, res, next) => {
   try {
     const course = await ensureCourseAccess(req.params.courseId, req.user);
 
-    // FIX LỖI 422: Ép kiểu Number rõ ràng cho sectionId nhận từ FormData
     const targetSectionId = req.body.sectionId ? Number(req.body.sectionId) : null;
 
     const section = await CourseSection.findOne({
@@ -542,7 +589,6 @@ const createLesson = async (req, res, next) => {
       documentUrl = `/uploads/documents/${req.file.filename}`;
     }
 
-    // FIX LỖI 422: Chuẩn hóa toàn bộ kiểu dữ liệu String sang Boolean và Number cho Sequelize
     const lesson = await Lesson.create({
       courseId: course.id,
       sectionId: section.id,
@@ -572,7 +618,6 @@ const updateLesson = async (req, res, next) => {
   try {
     const { lesson, course } = await ensureLessonAccess(req.params.lessonId, req.user);
 
-    // FIX LỖI 422: Ép kiểu Number rõ ràng cho sectionId nhận từ FormData tránh treo Schema Validate
     const targetSectionId = req.body.sectionId ? Number(req.body.sectionId) : lesson.sectionId;
 
     const section = await CourseSection.findOne({
@@ -596,7 +641,6 @@ const updateLesson = async (req, res, next) => {
       documentUrl = req.body.documentUrl;
     }
 
-    
     lesson.sectionId = section.id;
     lesson.title = req.body.title || lesson.title;
     lesson.lessonType = req.body.lessonType || lesson.lessonType;
@@ -604,7 +648,6 @@ const updateLesson = async (req, res, next) => {
     lesson.videoUrl = req.body.videoUrl !== undefined ? req.body.videoUrl : lesson.videoUrl;
     lesson.documentUrl = documentUrl; 
     lesson.durationSeconds = req.body.durationSeconds ? Number(req.body.durationSeconds) : null;
-    
     
     lesson.isPreview = String(req.body.isPreview) === 'true' || req.body.isPreview === true || req.body.isPreview === 1;
     lesson.isPublished = !(String(req.body.isPublished) === 'false' || req.body.isPublished === false || req.body.isPublished === 0);
@@ -964,4 +1007,5 @@ module.exports = {
   getCourseEnrollments,
   addEnrollmentByEmail,
   removeEnrollment,
+  getInstructorsList, // THÊM MỚI EXPORT
 };

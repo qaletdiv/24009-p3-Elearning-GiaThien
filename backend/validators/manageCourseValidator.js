@@ -45,6 +45,11 @@ const createOrUpdateCourseValidator = [
     .optional({ nullable: true })
     .isInt({ min: 1 })
     .withMessage('categoryId không hợp lệ'),
+  
+  body('instructorId')
+    .optional({ nullable: true })
+    .isInt({ min: 1 })
+    .withMessage('instructorId phải là số nguyên ID hợp lệ'),
 
   body('price')
     .optional()
